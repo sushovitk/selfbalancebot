@@ -21,7 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stdio.h"
+#include "BNO055_STM32.h"
+#include "calib_flash.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,6 +53,12 @@ SPI_HandleTypeDef hspi3;
 
 /* USER CODE BEGIN PV */
 
+uint8_t OffsetDatas[22];
+BNO055_Sensors_t BNO055;
+uint8_t imu_raw_data[24];              // DMA dumps the 24 bytes here
+volatile bool imu_data_ready = false; // Flag to tell the main loop data is fresh
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -68,7 +76,92 @@ static void MX_SPI3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void Sensor_Init(void)
+{
+	BNO_Status_t Status = {0};
 
+	//Init structure definition section
+	BNO055_Init_t BNO055_InitStruct = {0};
+
+	//Reset section
+	ResetBNO055();
+	HAL_Delay(800);
+	/*============================ *BNO055 Initialization* ============================*/
+
+	BNO055_InitStruct.ACC_Range = Range_4G;			//Range_X
+	BNO055_InitStruct.Axis = DEFAULT_AXIS_REMAP;			//value will be entered by looking at the data sheet
+	BNO055_InitStruct.Axis_sign = DEFAULT_AXIS_SIGN;		//value will be entered by looking at the data sheet
+	BNO055_InitStruct.Clock_Source = CLOCK_EXTERNAL;		//CLOCK_EXTERNAL or CLOCK_INTERNAL
+	BNO055_InitStruct.Mode = BNO055_NORMAL_MODE;			//BNO055_X_MODE   X:NORMAL, LOWPOWER, SUSPEND
+	BNO055_InitStruct.OP_Modes = IMU;
+	BNO055_InitStruct.Unit_Sel = (UNIT_ORI_ANDROID | UNIT_TEMP_CELCIUS | UNIT_EUL_DEG | UNIT_GYRO_DPS | UNIT_ACC_MS2);
+									//(UNIT_ORI_X | UNIT_TEMP_X | UNIT_EUL_X | UNIT_GYRO_X | UNIT_ACC_X)
+	BNO055_Init(BNO055_InitStruct);
+
+	//------------------BNO055 Calibration------------------
+
+	/*This function allows the sensor offset data obtained after BNO055 is calibrated once to be written
+	 *to the registers. In this way, there is no need to calibrate the sensor every time it is powered on.
+	 */
+	//setSensorOffsets(OffsetDatas);
+
+	/*-=-=-=-=-=-=Calibration Part-=-=-=-=-=-=*/
+	uint8_t calibBuf[CALIB_DATA_SIZE];
+	bool needs_calibration = false;
+
+	/*
+	if(Calibrate_BNO055())
+	{
+		getSensorOffsets(OffsetDatas);
+	}
+	else
+	{
+		printf("Sensor calibration failed.\nFailed to retrieve offset data\n");
+	}*/
+
+	// hold user button at boot to force recalibration
+	if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_SET) {
+		printf("User button held — forcing recalibration.\r\n");
+		Calib_Flash_Erase();
+		needs_calibration = true;
+
+	} else if (Calib_Flash_Load(calibBuf)) {
+		// Restore saved offsets to BNO055
+
+		setSensorOffsets(calibBuf);
+		printf("Calibration restored from flash — skipping recalibration.\r\n");
+
+	} else {
+
+		// Flash load failed or was empty
+		needs_calibration = true;
+	}
+
+	if (needs_calibration) {
+
+		// No saved data — run full calibration
+		if(Calibrate_BNO055())
+			{
+				getSensorOffsets(OffsetDatas);	// read offsets from BNO055
+				Calib_Flash_Save(OffsetDatas);     // save to flash for next boot
+			}
+			else
+			{
+				printf("Sensor calibration failed.\nFailed to retrieve offset data\n");
+			}
+
+	}
+
+
+	Check_Status(&Status);
+	printf("Selftest Result: %d\t",Status.STresult);
+	printf("System Status: %d\t",Status.SYSStatus);
+	printf("System Error: %d\n",Status.SYSError);
+
+}
+
+uint8_t RX[8];
+uint8_t TX[8] = { 0x01, 0x42};
 /* USER CODE END 0 */
 
 /**
@@ -108,12 +201,91 @@ int main(void)
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
 
+  // initialize controller
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+
+  // initialize the sensor
+  //Sensor_Init();
+
+  // Fetch the current calibration levels
+      //Calib_status_t current_calib = {0};
+      //getCalibration(&current_calib);
+
+      // Print them out to see if the flash memory injection worked
+      //printf("Boot Calibration Level -> System: %d | Gyro: %d | Accel: %d\r\n",
+             //current_calib.System, current_calib.Gyro, current_calib.Acc);
+
+      // start the DMA read
+      HAL_StatusTypeDef status = BNO055_Read_DMA(imu_raw_data);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  // interfacing with conotrller
+	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
+	  HAL_SPI_TransmitReceive(&hspi1, TX, RX, 8, 10);
+	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
+
+	  // values for analog stick use RX[3]
+	  if (RX[3] == 0xFF) {
+		  printf("Idle \r\n");
+	  }
+	  else if (RX[3] == 0xEF) {
+		  printf("Forward \r\n");
+	  }
+	  else if (RX[3] == 0xBF) {
+		  printf("Backward \r\n");
+	  }
+	  else if (RX[3] == 0x7F) {
+		  printf("Left \r\n");
+	  }
+	  else if (RX[3] == 0xDF) {
+		  printf("Right \r\n");
+	  }
+
+	  /* Read Euler angles and Gyro without DMA*/
+	  //ReadData(&BNO055, SENSOR_EULER|SENSOR_ACCEL|SENSOR_GYRO);
+
+
+	  if(imu_data_ready) {
+		  // Immediately clear the flag
+		  imu_data_ready = false;
+
+		  // Kick off the next DMA read. The CPU moves on instantly.
+		  // (Note: To ensure exactly 100Hz, I might move this trigger into a Hardware Timer)
+		  status = BNO055_Read_DMA(imu_raw_data);
+
+		  if (status == HAL_OK) {
+		        printf("DMA Request Accepted!\r\n");
+		    } else if (status == HAL_BUSY) {
+		        printf("ERROR: I2C is Busy!\r\n");
+		    } else {
+		        printf("ERROR: DMA Request Failed!\r\n");
+		    }
+	  }
+
+	  /* ── Euler Angles (degrees) ──────────────────────────────── */
+	  /*
+	  // Euler.Y = Pitch → this is your main balancing angle
+	  printf("--- BNO055 Data ---\r\n");
+	  printf("Euler -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
+	               BNO055.Euler.X, BNO055.Euler.Y, BNO055.Euler.Z);
+
+	  // ── Gyroscope (degrees/sec) ─────────────────────────────── //
+	  printf("Accel -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
+	               BNO055.Accel.X, BNO055.Accel.Y, BNO055.Accel.Z);
+
+	  // ── Accelerometer (m/s²) ────────────────────────────────── //
+	  printf("Gyro  -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
+	               BNO055.Gyro.X, BNO055.Gyro.Y, BNO055.Gyro.Z);
+
+	  printf("--------------------------------------------------\r\n");
+	  */
+
+	// Add a 100ms delay so your terminal doesn't crash from reading too fast
+	//HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -682,7 +854,27 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+#ifdef __GNUC__
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#else
+  #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#endif /* __GNUC__ */
+PUTCHAR_PROTOTYPE
+{
+  HAL_UART_Transmit(&hlpuart1, (uint8_t *)&ch, 1, 0xFFFF);
+  return ch;
+}
 
+void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c) {
+    if (hi2c->Instance == I2C1) {
+
+    	// call store function to store the information
+    	BNO055_DMA_store(&BNO055);
+
+        // Flag the main loop that ALL data is fresh!
+        imu_data_ready = true;
+    }
+}
 /* USER CODE END 4 */
 
 /**
