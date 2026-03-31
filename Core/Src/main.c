@@ -24,6 +24,8 @@
 #include "stdio.h"
 #include "BNO055_STM32.h"
 #include "calib_flash.h"
+#include <string.h>
+#include "pixy2.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,7 +60,12 @@ BNO055_Sensors_t BNO055;
 uint8_t imu_raw_data[24];              // DMA dumps the 24 bytes here
 volatile bool imu_data_ready = false; // Flag to tell the main loop data is fresh
 
+#define PIXY2_SEND_SYNC_BYTE  0xae
+#define PIXY2_SEND_SYNC_BYTE2 0xc1
+#define PIXY2_RECV_SYNC_BYTE  0xaf
+#define PIXY2_RECV_SYNC_BYTE2 0xc1
 
+Pixy2 pixy;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -76,6 +83,13 @@ static void MX_SPI3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static inline void Pixy2_CS_Select(void) {
+	HAL_GPIO_WritePin(PIXY_CS_GPIO_Port, PIXY_CS_Pin, GPIO_PIN_RESET);
+}
+static inline void Pixy2_CS_Deselect(void) {
+	HAL_GPIO_WritePin(PIXY_CS_GPIO_Port, PIXY_CS_Pin, GPIO_PIN_SET);
+}
+
 void Sensor_Init(void)
 {
 	BNO_Status_t Status = {0};
@@ -203,6 +217,13 @@ int main(void)
 
   // initialize controller
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+  // TODO: CONFLICTS WITH CONTROLLER
+  // Ensure all LEDs start off 
+	// LD2 blue = PB7, LD3 red = PB14
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
 
   // initialize the sensor
   //Sensor_Init();
@@ -217,6 +238,25 @@ int main(void)
 
       // start the DMA read
       HAL_StatusTypeDef status = BNO055_Read_DMA(imu_raw_data);
+      // 3 slow blinks on LD2 (blue) = board alive, about to attempt Pixy2 init
+	for (int i = 0; i < 3; i++) {
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+		HAL_Delay(500);
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+		HAL_Delay(500);
+	}
+
+	if (Pixy2_Init(&pixy, &hspi1, GPIOD, GPIO_PIN_14) == HAL_OK) {
+		// 2 fast blinks on LD2 (blue) = Pixy2 init succeeded
+		for (int i = 0; i < 2; i++) {
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+			HAL_Delay(150);
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+			HAL_Delay(150);
+		}
+	} else {
+		Error_Handler();  // Rapid blink = SPI init failed
+	}
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -243,6 +283,33 @@ int main(void)
 	  }
 	  else if (RX[3] == 0xDF) {
 		  printf("Right \r\n");
+
+
+      /* ========== PIXYCAM CODE ========== */
+
+      int count = Pixy2_GetBlocks(&pixy, 0xff, 10);
+
+		uint8_t sig1Detected = 0;  // sig 1 -> LD3 red  (PB14)
+		uint8_t sig2Detected = 0;  // sig 2 -> LD2 blue (PB7)
+
+		if (count > 0) {
+			for (int i = 0; i < count; i++) {
+				if (pixy.blocks[i].signature == 2)
+					sig1Detected = 1;
+				if (pixy.blocks[i].signature == 1)
+					sig2Detected = 1;
+			}
+		}
+
+		// LD3 red = PB14: ON while signature 1 is detected
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,
+				sig1Detected ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+		// LD2 blue = PB7: ON while signature 2 is detected
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7,
+				sig2Detected ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+		// HAL_Delay(50);
 	  }
 
 	  /* Read Euler angles and Gyro without DMA*/
@@ -507,16 +574,16 @@ static void MX_SPI1_Init(void)
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW; // is HIGH for Pixy
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE; // is 2EDGE for PIXY
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_LSB;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256; // 64 for PIXY
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_LSB; // MSB for Pixy
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi1.Init.CRCPolynomial = 7;
   hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE; // DISABLED for PIXY
   if (HAL_SPI_Init(&hspi1) != HAL_OK)
   {
     Error_Handler();
@@ -616,6 +683,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(PIXY_CS_GPIO_Port, PIXY_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : PE2 PE3 */
   GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3;
@@ -629,7 +697,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
+
+  /*
+  	Configure GPIO pins : PF0 PF1 PF2 
+	GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	GPIO_InitStruct.Alternate = GPIO_AF4_I2C2;
+	HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  */
 
   /*Configure GPIO pin : PF7 */
   GPIO_InitStruct.Pin = GPIO_PIN_7;
@@ -656,7 +734,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Pin = GPIO_PIN_1; // | GPIO_PIN_3 for PIXY
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG_ADC_CONTROL;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -683,7 +761,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB2 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2;
+  GPIO_InitStruct.Pin = GPIO_PIN_2; // GPIO_PIN_6 for PIXY
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -753,6 +831,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
+
+  /*
+  	Configure GPIO pin : PIXY_CS_Pin PD14
+	GPIO_InitStruct.Pin = PIXY_CS_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(PIXY_CS_GPIO_Port, &GPIO_InitStruct);
+  */
+
   /*Configure GPIO pin : PD15 */
   GPIO_InitStruct.Pin = GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -760,6 +848,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF2_TIM4;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+
+  /*
+  // PIXY Configure GPIO pins : PG7 PG8
+	GPIO_InitStruct.Pin = GPIO_PIN_7 | GPIO_PIN_8;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	GPIO_InitStruct.Alternate = GPIO_AF8_LPUART1;
+	HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
+  */
 
   /*Configure GPIO pin : PC6 */
   GPIO_InitStruct.Pin = GPIO_PIN_6;
@@ -826,7 +925,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PD3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_3;
+  GPIO_InitStruct.Pin = GPIO_PIN_3; //| GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6; for PIXY 
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
@@ -840,6 +939,24 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /*
+  // Configure GPIO pins : PB3 PB4 PB5 PIXY
+	GPIO_InitStruct.Pin = GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+	// Configure GPIO pins : PB8 PB9 PIXY
+	GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+  */
+
+
   /*Configure GPIO pin : PE0 */
   GPIO_InitStruct.Pin = GPIO_PIN_0;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -849,7 +966,14 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
+	GPIO_InitStruct.Pin = GPIO_PIN_7 | GPIO_PIN_14;  // LD2 blue | LD3 red
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);  // LD2 blue off
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);  // LD3 red  off
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
@@ -888,6 +1012,10 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+		HAL_Delay(100);
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+		HAL_Delay(100);
   }
   /* USER CODE END Error_Handler_Debug */
 }

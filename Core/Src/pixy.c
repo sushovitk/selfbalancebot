@@ -74,7 +74,8 @@ static inline void Pixy2_CS_Deselect(void) {
  * @brief  The application entry point.
  * @retval int
  */
-int main(void) {
+int main(void) 
+{
 
 	/* USER CODE BEGIN 1 */
 
