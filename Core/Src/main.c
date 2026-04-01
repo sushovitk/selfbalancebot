@@ -262,8 +262,8 @@ void BNO055_setup() {
 
 }
 
-uint8_t RX[9];
-uint8_t TX[9] = { 0x01, 0x42};
+uint8_t PS2_RX[9];
+uint8_t PS2_TX[9] = { 0x01, 0x42};
 /* USER CODE END 0 */
 
 /**
@@ -435,19 +435,21 @@ int main(void)
     
     
     */
+
 	  // interfacing with conotrller
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
-	  HAL_SPI_TransmitReceive(&hspi3, TX, RX, 9, 10);
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
+    uint8_t *x;
+    uint8_t *y;
+    read_ps2(x, y);
 
-    uint8_t x = 0x7b;
-    uint8_t y = 0x7b;
+	  // HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
+	  // HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
+	  // HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
 
-	  // values for analog stick use RX[3]
-	  if(RX[5] != 0x7b || RX[6] != 0x7b){
-      x = RX[5];
-      y = RX[6];
-    }
+	  // // values for analog stick use RX[3]
+	  // if(PS2_RX[5] != 0x7b || PS2_RX[6] != 0x7b){
+    //   x = PS2_RX[5];
+    //   y = PS2_RX[6];
+    // }
 
       /* ========== PIXYCAM CODE ========== */
 

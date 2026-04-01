@@ -22,36 +22,40 @@
 // 0 is pressed, 1 is released
 // Lookup table
 // RX[3]
-#define Select   	~0b00000001 
-#define L3 		    ~0b00000010
-#define L3 		    ~0b00000100
-#define Start   	~0b00001000
-#define Up		    ~0b00010000
-#define Right    	~0b00100000
-#define Down        ~0b01000000
-#define Left	    ~0b10000000
+#define PS2_Select   	~0b00000001 
+#define PS2_L3 		    ~0b00000010
+#define PS2_L3 		    ~0b00000100
+#define PS2_Start   	~0b00001000
+#define PS2_Up		    ~0b00010000
+#define PS2_Right    	~0b00100000
+#define PS2_Down        ~0b01000000
+#define PS2_Left	    ~0b10000000
 
 // RX[4]
-#define L2 	    	~0b00000001 
-#define R2 	    	~0b00000010
-#define L1 		    ~0b00000100
-#define R1 		    ~0b00001000
-#define Triangle    ~0b00010000
-#define O		    ~0b00100000
-#define X		    ~0b01000000
-#define Square  	~0b10000000
+#define PS2_L2 	    	~0b00000001 
+#define PS2_R2 	    	~0b00000010
+#define PS2_L1 		    ~0b00000100
+#define PS2_R1 		    ~0b00001000
+#define PS2_Triangle    ~0b00010000
+#define PS2_O		    ~0b00100000
+#define PS2_X		    ~0b01000000
+#define PS2_Square  	~0b10000000
 
+extern SPI_HandleTypeDef hspi3;
+
+uint8_t PS2_RX[9];
+uint8_t PS2_TX[9] = { 0x01, 0x42};
 
 void read_ps2(uint8_t *x, uint8_t *y){
 
     // initiate transaction with PS2 controller
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
-	HAL_SPI_TransmitReceive(&hspi3, TX, RX, 9, 10);
+	HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
 
     // read RX
-    if(RX[5] != 0x7b || RX[6] != 0x7b){
-        *x = RX[5];
-        *y = RX[6];
+    if(PS2_RX[5] != 0x7b || PS2_RX[6] != 0x7b){
+        *x = PS2_RX[5];
+        *y = PS2_RX[6];
     }
 }
