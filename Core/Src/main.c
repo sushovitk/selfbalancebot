@@ -244,6 +244,20 @@ void Sensor_Init(void)
 
 }
 
+void BNO055_setup() {
+	// initialize the sensor
+	Sensor_Init();
+
+	// Fetch the current calibration levels
+	Calib_status_t current_calib = {0};
+	getCalibration(&current_calib);
+
+	// Print them out to see if the flash memory injection worked
+	printf("Boot Calibration Level -> System: %d | Gyro: %d | Accel: %d\r\n",
+	       current_calib.System, current_calib.Gyro, current_calib.Acc);
+
+}
+
 uint8_t RX[8];
 uint8_t TX[8] = { 0x01, 0x42};
 /* USER CODE END 0 */
@@ -302,19 +316,12 @@ int main(void)
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
 
   // initialize the sensor
-  //Sensor_Init();
+  BNO055_setup();
+      
+  // start the DMA read
+  HAL_StatusTypeDef status = BNO055_Read_DMA(imu_raw_data);
 
-  // Fetch the current calibration levels
-      //Calib_status_t current_calib = {0};
-      //getCalibration(&current_calib);
-
-      // Print them out to see if the flash memory injection worked
-      //printf("Boot Calibration Level -> System: %d | Gyro: %d | Accel: %d\r\n",
-             //current_calib.System, current_calib.Gyro, current_calib.Acc);
-
-      // start the DMA read
-      HAL_StatusTypeDef status = BNO055_Read_DMA(imu_raw_data);
-      // 3 slow blinks on LD2 (blue) = board alive, about to attempt Pixy2 init
+  // 3 slow blinks on LD2 (blue) = board alive, about to attempt Pixy2 init
 	for (int i = 0; i < 3; i++) {
 		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
 		HAL_Delay(500);
@@ -1076,7 +1083,7 @@ PUTCHAR_PROTOTYPE
 }
 
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c) {
-    if (hi2c->Instance == I2C1) {
+    if (hi2c->Instance == I2C2) {
 
     	// call store function to store the information
     	BNO055_DMA_store(&BNO055);
