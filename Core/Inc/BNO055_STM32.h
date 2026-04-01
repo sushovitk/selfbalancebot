@@ -13,8 +13,8 @@
 #include "stm32l4xx_hal.h"
 #include <stdbool.h>
 
-extern I2C_HandleTypeDef hi2c1;
-#define bno_i2c (hi2c1)
+extern I2C_HandleTypeDef hi2c2;
+#define bno_i2c (hi2c2)
 extern uint8_t imu_raw_data[24];
 
 

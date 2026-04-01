@@ -407,7 +407,7 @@ void getCalibration(Calib_status_t *calib) {
     uint8_t calData;
 
     // Read calibration status register using I2C
-    HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c1, P_BNO055, CALIB_STAT_ADDR, 1, &calData, 1, HAL_MAX_DELAY);
+    HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c2, P_BNO055, CALIB_STAT_ADDR, 1, &calData, 1, HAL_MAX_DELAY);
 
     // Check if read was successful
     if (status == HAL_OK) {
