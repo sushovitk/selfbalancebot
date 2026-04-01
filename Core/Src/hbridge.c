@@ -21,7 +21,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,7 +57,6 @@ static void MX_TIM2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
 /**
  * @brief  Set motor speed and direction.
  * @param  duty   PWM duty cycle, 0–1000 (maps to 0–100% on ARR=999)
@@ -169,7 +167,6 @@ int main(void)
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
-
 
 /**
   * @brief System Clock Configuration
