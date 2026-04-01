@@ -436,21 +436,21 @@ int main(void)
     
     */
 
-	  // interfacing with conotrller
+	  /* ========== PS2 CONTROLLER CODE ========== */
     uint8_t *x;
     uint8_t *y;
     read_ps2(x, y);
 
-	  // HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
-	  // HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
-	  // HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
+    // convert to position data
+    // Y DATA GIVES POWER (Forward if > 0x7b, backwards if 0x7b > )
+    // X DATA GIVES DISTRIBUTION
+    	// full to both if x == 0x7b, 
+    	// 100% Left if 0x00,
+    	// 100% right if 0xFF,
+    	// split ratio based on difference 
+    	// use equation x/0xFF and (0xFF - x)/0xFF
 
-	  // // values for analog stick use RX[3]
-	  // if(PS2_RX[5] != 0x7b || PS2_RX[6] != 0x7b){
-    //   x = PS2_RX[5];
-    //   y = PS2_RX[6];
-    // }
-
+	  
       /* ========== PIXYCAM CODE ========== */
 
       int count = Pixy2_GetBlocks(&pixy, 0xff, 10);
