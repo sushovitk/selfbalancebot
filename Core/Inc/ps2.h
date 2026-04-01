@@ -43,10 +43,6 @@
 
 
 void read_ps2(uint8_t *x, uint8_t *y){
-    uint8_t RX[9];
-    uint8_t TX[9] = {
-            0x01, 0x42
-    };
 
     // initiate transaction with PS2 controller
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);

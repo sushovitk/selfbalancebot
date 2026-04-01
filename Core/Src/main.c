@@ -27,6 +27,7 @@
 #include "BNO055_STM32.h"
 #include "calib_flash.h"
 #include "pixy2.h"
+#include "ps2.h"
 
 /* USER CODE END Includes */
 
@@ -261,8 +262,8 @@ void BNO055_setup() {
 
 }
 
-uint8_t RX[8];
-uint8_t TX[8] = { 0x01, 0x42};
+uint8_t RX[9];
+uint8_t TX[9] = { 0x01, 0x42};
 /* USER CODE END 0 */
 
 /**
@@ -436,25 +437,17 @@ int main(void)
     */
 	  // interfacing with conotrller
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
-	  HAL_SPI_TransmitReceive(&hspi1, TX, RX, 8, 10);
+	  HAL_SPI_TransmitReceive(&hspi3, TX, RX, 9, 10);
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
 
-	  // values for analog stick use RX[3]
-	  if (RX[3] == 0xFF) {
-		  printf("Idle \r\n");
-	  }
-	  else if (RX[3] == 0xEF) {
-		  printf("Forward \r\n");
-	  }
-	  else if (RX[3] == 0xBF) {
-		  printf("Backward \r\n");
-	  }
-	  else if (RX[3] == 0x7F) {
-		  printf("Left \r\n");
-	  }
-	  else if (RX[3] == 0xDF) {
-		  printf("Right \r\n");
+    uint8_t x = 0x7b;
+    uint8_t y = 0x7b;
 
+	  // values for analog stick use RX[3]
+	  if(RX[5] != 0x7b || RX[6] != 0x7b){
+      x = RX[5];
+      y = RX[6];
+    }
 
       /* ========== PIXYCAM CODE ========== */
 
