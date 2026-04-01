@@ -18,14 +18,16 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "stdio.h"
+#include <string.h>
+#include <stdio.h>
+#include "vl53l0x_api.h"
+#include "vl53l0x_platform.h"
 #include "BNO055_STM32.h"
 #include "calib_flash.h"
-#include <string.h>
 #include "pixy2.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -35,7 +37,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define VL53L0X_ADDR 0x52
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,7 +59,8 @@ SPI_HandleTypeDef hspi3;
 TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
-
+VL53L0X_Dev_t vl53_dev;
+VL53L0X_DEV Dev = &vl53_dev;
 uint8_t OffsetDatas[22];
 BNO055_Sensors_t BNO055;
 uint8_t imu_raw_data[24];              // DMA dumps the 24 bytes here
@@ -270,6 +273,12 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+	VL53L0X_Error status;
+	uint32_t refSpadCount = 0;
+	uint8_t isApertureSpads = 0;
+	uint8_t VhvSettings = 0;
+	uint8_t PhaseCal = 0;
+	VL53L0X_RangingMeasurementData_t RangingData;
 
   /* USER CODE END 1 */
 
@@ -340,12 +349,65 @@ int main(void)
 	} else {
 		Error_Handler();  // Rapid blink = SPI init failed
 	}
-  /* USER CODE END 2 */
 
+    // Sensor boot up
+  HAL_Delay(10);
+
+  memset(&vl53_dev, 0, sizeof(vl53_dev));
+  Dev->I2cDevAddr = VL53L0X_ADDR;
+  Dev->comms_type = 1;
+  Dev->comms_speed_khz = 100;
+
+  status = VL53L0X_DataInit(Dev);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("DataInit failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  status = VL53L0X_StaticInit(Dev);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("StaticInit failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  status = VL53L0X_PerformRefSpadManagement(Dev, &refSpadCount, &isApertureSpads);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("RefSpadManagement failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  status = VL53L0X_PerformRefCalibration(Dev, &VhvSettings, &PhaseCal);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("RefCalibration failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  status = VL53L0X_SetDeviceMode(Dev, VL53L0X_DEVICEMODE_SINGLE_RANGING);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("SetDeviceMode failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  printf("VL53L0X ready\r\n");
+  /* USER CODE END 2 */
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    status = VL53L0X_PerformSingleRangingMeasurement(Dev, &RangingData);
+
+    if (status == VL53L0X_ERROR_NONE) {
+      printf("Distance = %u mm\r\n",
+             (unsigned int)RangingData.RangeMilliMeter);
+    } else
+    {
+      printf("Measurement failed: %d\r\n", status);
+    }
     /* ============ HBRIDGE SAMPLE CODE ============
     for (uint16_t speed = 0; speed <= 1000; speed += 10)
 	          {
@@ -492,7 +554,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
   RCC_OscInitStruct.MSICalibrationValue = 0;
   RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON; // NONE for vl53l0x
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
   RCC_OscInitStruct.PLL.PLLM = 1;
   RCC_OscInitStruct.PLL.PLLN = 40;
@@ -508,12 +570,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK; // RCC_SYSCLKSOURCE_MSI for VL53L0X
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK) // FLASH_LATENCY_- for VL53
   {
     Error_Handler();
   }
@@ -583,7 +645,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x10D19CE4;
+  hi2c2.Init.Timing = 0x00100D14;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -871,6 +933,14 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF13_SAI1;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : PF0 PF1 PF2 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF4_I2C2;
+  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+
   /*Configure GPIO pins : PC0 PC1 PC2 PC3
                            PC4 PC5 */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
@@ -885,6 +955,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  /*Configure GPIO pin : PA0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF1_TIM2;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB0 */
   GPIO_InitStruct.Pin = GPIO_PIN_0;
@@ -893,11 +970,29 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
+  /*Configure GPIO pins : PA1 PA3 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG_ADC_CONTROL;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  /*Configure GPIO pins : PA4 PA5 PA6 PA7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
   /*Configure GPIO pin : PB1 */
   GPIO_InitStruct.Pin = GPIO_PIN_1;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG_ADC_CONTROL;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    /*Configure GPIO pin : PB0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB2 */
@@ -937,7 +1032,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF13_SAI2;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
+  /*Configure GPIO pin : PB1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG_ADC_CONTROL;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
   /*Configure GPIO pin : PB14 */
   GPIO_InitStruct.Pin = GPIO_PIN_14;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -1042,6 +1141,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+    /*Configure GPIO pins : PD4 PD5 PD6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB6 */
   GPIO_InitStruct.Pin = GPIO_PIN_6;
@@ -1049,7 +1155,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
+/*Configure GPIO pins : PB3 PB4 PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
   /*Configure GPIO pin : PE0 */
   GPIO_InitStruct.Pin = GPIO_PIN_0;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
