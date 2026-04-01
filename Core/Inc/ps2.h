@@ -1,3 +1,6 @@
+#pragma once
+#include <stdint.h>
+#include "main.h"
 // RX[0] - 0xFF
 // RX[1] - 0x41 / 0x73 - we want analog (0x73)
 // RX[2] - 0x5a 
@@ -39,9 +42,8 @@
 #define Square  	~0b10000000
 
 
-
 void read_ps2(uint8_t *x, uint8_t *y){
-    uint8_t RX[9];a
+    uint8_t RX[9];
     uint8_t TX[9] = {
             0x01, 0x42
     };
