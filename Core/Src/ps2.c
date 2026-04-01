@@ -1,5 +1,8 @@
 #include "p2s.h"
 
+uint8_t PS2_RX[9];
+uint8_t PS2_TX[9] = { 0x01, 0x42};
+
 void read_ps2(uint8_t *x, uint8_t *y){
 
     // initiate transaction with PS2 controller
