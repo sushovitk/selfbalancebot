@@ -41,7 +41,7 @@
 void read_ps2(){
     // initiate transaction with PS2 controller
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
-	HAL_SPI_TransmitReceive(&hspi1, TX, RX, 8, 10);
+	HAL_SPI_TransmitReceive(&hspi3, TX, RX, 8, 10);
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
 
     // read RX
