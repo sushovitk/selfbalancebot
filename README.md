@@ -1,3 +1,41 @@
+# EECS 373 Winter 2026 Project Team 16 - Self Balancing Robot
+Using the Nucleo-L4R5ZI-P board equipped with the Arm® Cortex®-M4 chip.  
+## Pinout
+### PIXY Camera
+PH0 - OSC_IN  
+PH1 - OSC_OUT  
+PA5 - SPI1_CLK  
+PA6 - SPI1_MISO  
+PA7 - SPI1_MOSI  
+PD14 - GPIO output  
+### MOTOR 
+PA11 - TIM1_CH4  
+PD4 - GPIO output  
+PD5 - GPIO output  
+PD6 - GPIO output  
+PD7 - GPIO output  
+PA0 - TIM2_CH1  
+PA1 - TIM2_CH2  
+### Putty (printf)
+PG8 - LPUART_RX  
+PG7 - LPUART_TX  
+IMU (BN0O…)  
+PF0 - I2C2_SDA  
+PF1 - I2C2_SCL  
+PC13 - GPIO input  
+PA3 - GPIO output  
+### ToF Distance sensor (VLF04X…)
+PB9 - I2C1_SDA  
+PB8 - I2C1_SCL  
+PF13 - GPIO interrupt  
+### PS2 controller 
+PB3 - SPI3_SCK  
+PB4 - SPI3_MISO  
+PB5 - SPI3_MOSI  
+PB6 - GPIO output  
+
+## PID
+<W.I.P.>
 # EECS 373: Proposal for Team 16 Self-Balancing Robot Project 
 **Authors:** Yanlei Chen, Robert Conforti, Reshob Islam, Sushovit Khadka 
 
