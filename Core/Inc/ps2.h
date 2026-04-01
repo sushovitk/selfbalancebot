@@ -38,10 +38,18 @@
 #define X		    ~0b01000000
 #define Square  	~0b10000000
 
+
+
+
 void read_ps2(){
+    uint8_t RX[9];
+    uint8_t TX[9] = {
+            0x01, 0x42
+    };
+
     // initiate transaction with PS2 controller
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
-	HAL_SPI_TransmitReceive(&hspi3, TX, RX, 8, 10);
+	HAL_SPI_TransmitReceive(&hspi3, TX, RX, 9, 10);
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
 
     // read RX
