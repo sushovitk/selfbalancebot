@@ -14,6 +14,8 @@
 // RX[7] - analog stick2 x (left stick)
 // RX[8] - analog stick2 y
 
+// EX READOUT: 0xff, 0x73, 0x5a, 0xff, 0xff, 0x7b, 0x7b, 0x7b, 0x7b
+
 // 0 is pressed, 1 is released
 // Lookup table
 // RX[3]
@@ -43,6 +45,5 @@ void read_ps2(){
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
 
     // read RX
-
 
 }
