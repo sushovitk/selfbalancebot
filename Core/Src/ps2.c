@@ -1,4 +1,4 @@
-#include "p2s.h"
+#include "ps2.h"
 
 uint8_t PS2_RX[9];
 uint8_t PS2_TX[9] = { 0x01, 0x42};
