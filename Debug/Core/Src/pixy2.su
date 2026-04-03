@@ -1,0 +1,30 @@
+../Core/Inc/TPixy2.h:31:24:uint32_t millis()	8	static
+../Core/Inc/TPixy2.h:36:20:void delayMicroseconds(uint32_t)	16	static
+../Core/Inc/Pixy2SPI_SS.h:46:7:void Link2SPI_SS::configure(SPI_HandleTypeDef*, GPIO_TypeDef*, uint16_t)	24	static
+../Core/Inc/Pixy2SPI_SS.h:56:9:int8_t Link2SPI_SS::open(uint32_t)	16	static
+../Core/Inc/Pixy2SPI_SS.h:63:7:void Link2SPI_SS::close()	16	static
+../Core/Inc/Pixy2SPI_SS.h:71:10:int16_t Link2SPI_SS::recv(uint8_t*, uint8_t, uint16_t*)	40	static
+../Core/Inc/Pixy2SPI_SS.h:90:10:int16_t Link2SPI_SS::send(uint8_t*, uint8_t)	40	static
+../Core/Src/pixy2.cpp:43:13:void copyBlock(Pixy2Block*, const Block*)	16	static
+../Core/Src/pixy2.cpp:72:19:HAL_StatusTypeDef Pixy2_Init(Pixy2*, SPI_HandleTypeDef*, GPIO_TypeDef*, uint16_t)	32	static
+../Core/Src/pixy2.cpp:113:19:HAL_StatusTypeDef Pixy2_GetVersion(Pixy2*)	24	static
+../Core/Src/pixy2.cpp:150:5:int Pixy2_GetBlocks(Pixy2*, uint8_t, uint8_t)	24	static
+../Core/Src/pixy2.cpp:181:19:HAL_StatusTypeDef Pixy2_SetLED(Pixy2*, uint8_t, uint8_t, uint8_t)	24	static
+../Core/Inc/Pixy2SPI_SS.h:39:7:constexpr Link2SPI_SS::Link2SPI_SS()	16	static
+../Core/Inc/TPixy2.h:156:27:TPixy2<LinkType>::TPixy2() [with LinkType = Link2SPI_SS]	16	static
+../Core/Inc/TPixy2.h:176:34:int8_t TPixy2<LinkType>::init(uint32_t) [with LinkType = Link2SPI_SS]	24	static
+../Core/Inc/TPixy2.h:325:34:int8_t TPixy2<LinkType>::getVersion() [with LinkType = Link2SPI_SS]	16	static
+../Core/Inc/Pixy2CCC.h:74:8:int8_t Pixy2CCC<LinkType>::getBlocks(bool, uint8_t, uint8_t) [with LinkType = Link2SPI_SS]	16	static
+../Core/Inc/TPixy2.h:388:34:int8_t TPixy2<LinkType>::setLED(uint8_t, uint8_t, uint8_t) [with LinkType = Link2SPI_SS]	16	static
+../Core/Inc/Pixy2CCC.h:57:5:Pixy2CCC<LinkType>::Pixy2CCC(TPixy2<LinkType>*) [with LinkType = Link2SPI_SS]	16	static
+../Core/Inc/Pixy2Line.h:88:2:Pixy2Line<LinkType>::Pixy2Line(TPixy2<LinkType>*) [with LinkType = Link2SPI_SS]	16	static
+../Core/Inc/Pixy2Video.h:21:5:Pixy2Video<LinkType>::Pixy2Video(TPixy2<LinkType>*) [with LinkType = Link2SPI_SS]	16	static
+../Core/Inc/TPixy2.h:343:34:int8_t TPixy2<LinkType>::getResolution() [with LinkType = Link2SPI_SS]	16	static
+../Core/Inc/TPixy2.h:289:35:int16_t TPixy2<LinkType>::sendPacket() [with LinkType = Link2SPI_SS]	16	static
+../Core/Inc/TPixy2.h:248:35:int16_t TPixy2<LinkType>::recvPacket() [with LinkType = Link2SPI_SS]	24	static
+../Core/Inc/TPixy2.h:202:35:int16_t TPixy2<LinkType>::getSync() [with LinkType = Link2SPI_SS]	32	static
+../Core/Src/pixy2.cpp:188:1:void __static_initialization_and_destruction_0()	8	static
+../Core/Src/pixy2.cpp:188:1:void __static_initialization_and_destruction_1()	8	static
+../Core/Inc/TPixy2.h:166:27:TPixy2<LinkType>::~TPixy2() [with LinkType = Link2SPI_SS]	16	static
+../Core/Src/pixy2.cpp:188:1:cpp)	8	static
+../Core/Src/pixy2.cpp:188:1:cpp)	8	static
