@@ -21,11 +21,15 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "stdio.h"
+#include <string.h>
+#include <stdio.h>
+#include "vl53l0x_api.h"
+#include "vl53l0x_platform.h"
 #include "BNO055_STM32.h"
 #include "calib_flash.h"
-#include <string.h>
 #include "pixy2.h"
+#include "ps2.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -35,7 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define VL53L0X_ADDR 0x52
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,7 +61,8 @@ SPI_HandleTypeDef hspi3;
 TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
-
+VL53L0X_Dev_t vl53_dev;
+VL53L0X_DEV Dev = &vl53_dev;
 uint8_t OffsetDatas[22];
 BNO055_Sensors_t BNO055;
 uint8_t imu_raw_data[24];              // DMA dumps the 24 bytes here
@@ -244,8 +249,22 @@ void Sensor_Init(void)
 
 }
 
-uint8_t RX[8];
-uint8_t TX[8] = { 0x01, 0x42};
+void BNO055_setup() {
+	// initialize the sensor
+	Sensor_Init();
+
+	// Fetch the current calibration levels
+	Calib_status_t current_calib = {0};
+	getCalibration(&current_calib);
+
+	// Print them out to see if the flash memory injection worked
+	printf("Boot Calibration Level -> System: %d | Gyro: %d | Accel: %d\r\n",
+	       current_calib.System, current_calib.Gyro, current_calib.Acc);
+
+}
+
+uint8_t PS2_RX[9];
+uint8_t PS2_TX[9] = { 0x01, 0x42};
 /* USER CODE END 0 */
 
 /**
@@ -256,6 +275,12 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+	VL53L0X_Error status;
+	uint32_t refSpadCount = 0;
+	uint8_t isApertureSpads = 0;
+	uint8_t VhvSettings = 0;
+	uint8_t PhaseCal = 0;
+	VL53L0X_RangingMeasurementData_t RangingData;
 
   /* USER CODE END 1 */
 
@@ -302,19 +327,12 @@ int main(void)
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
 
   // initialize the sensor
-  //Sensor_Init();
+  BNO055_setup();
+      
+  // start the DMA read
+  HAL_StatusTypeDef BNO055_status = BNO055_Read_DMA(imu_raw_data);
 
-  // Fetch the current calibration levels
-      //Calib_status_t current_calib = {0};
-      //getCalibration(&current_calib);
-
-      // Print them out to see if the flash memory injection worked
-      //printf("Boot Calibration Level -> System: %d | Gyro: %d | Accel: %d\r\n",
-             //current_calib.System, current_calib.Gyro, current_calib.Acc);
-
-      // start the DMA read
-      HAL_StatusTypeDef status = BNO055_Read_DMA(imu_raw_data);
-      // 3 slow blinks on LD2 (blue) = board alive, about to attempt Pixy2 init
+  // 3 slow blinks on LD2 (blue) = board alive, about to attempt Pixy2 init
 	for (int i = 0; i < 3; i++) {
 		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
 		HAL_Delay(500);
@@ -333,60 +351,108 @@ int main(void)
 	} else {
 		Error_Handler();  // Rapid blink = SPI init failed
 	}
+
+    // Sensor boot up
+  HAL_Delay(10);
+
+  memset(&vl53_dev, 0, sizeof(vl53_dev));
+  Dev->I2cDevAddr = VL53L0X_ADDR;
+  Dev->comms_type = 1;
+  Dev->comms_speed_khz = 100;
+
+  status = VL53L0X_DataInit(Dev);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("DataInit failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  status = VL53L0X_StaticInit(Dev);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("StaticInit failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  status = VL53L0X_PerformRefSpadManagement(Dev, &refSpadCount, &isApertureSpads);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("RefSpadManagement failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  status = VL53L0X_PerformRefCalibration(Dev, &VhvSettings, &PhaseCal);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("RefCalibration failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  status = VL53L0X_SetDeviceMode(Dev, VL53L0X_DEVICEMODE_SINGLE_RANGING);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("SetDeviceMode failed: %d\r\n", status);
+    Error_Handler();
+  }
+
+  printf("VL53L0X ready\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    status = VL53L0X_PerformSingleRangingMeasurement(Dev, &RangingData);
+
+    if (status == VL53L0X_ERROR_NONE) {
+      printf("Distance = %u mm\r\n",
+             (unsigned int)RangingData.RangeMilliMeter);
+    } else
+    {
+      printf("Measurement failed: %d\r\n", status);
+    }
     /* ============ HBRIDGE SAMPLE CODE ============
     for (uint16_t speed = 0; speed <= 1000; speed += 10)
 	          {
 	              Motor_Set(speed, 1);   // forward
-	              HAL_Delay(20);          20 ms per step → ~2 s ramp
+	              HAL_Delay(20);         /* 20 ms per step → ~2 s ramp
 	          }
 
-	          HAL_Delay(2000);            hold full speed for 2 s
+	          HAL_Delay(2000);           /* hold full speed for 2 s
 
-	          Motor_Brake();              hard stop
+	          Motor_Brake();             /* hard stop
 	          HAL_Delay(500);
 
-	           Ramp up reverse
+	          /* Ramp up reverse
 	          for (uint16_t speed = 0; speed <= 1000; speed += 10)
 	          {
-	              Motor_Set(speed, 0);    reverse
+	              Motor_Set(speed, 0);   /* reverse
 	              HAL_Delay(20);
 	          }
 
 	          HAL_Delay(2000);
 
-	          Motor_Coast();              free-wheel
+	          Motor_Coast();             /* free-wheel
 	          HAL_Delay(500);
     
     
     */
-	  // interfacing with conotrller
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
-	  HAL_SPI_TransmitReceive(&hspi1, TX, RX, 8, 10);
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
 
-	  // values for analog stick use RX[3]
-	  if (RX[3] == 0xFF) {
-		  printf("Idle \r\n");
-	  }
-	  else if (RX[3] == 0xEF) {
-		  printf("Forward \r\n");
-	  }
-	  else if (RX[3] == 0xBF) {
-		  printf("Backward \r\n");
-	  }
-	  else if (RX[3] == 0x7F) {
-		  printf("Left \r\n");
-	  }
-	  else if (RX[3] == 0xDF) {
-		  printf("Right \r\n");
+	  /* ========== PS2 CONTROLLER CODE ========== */
+    uint8_t *x = 0;
+    uint8_t *y = 0;
+    read_ps2(x, y);
 
+    // convert to position data
+    // Y DATA GIVES POWER (Forward if > 0x7b, backwards if 0x7b > )
+    // X DATA GIVES DISTRIBUTION
+    	// full to both if x == 0x7b, 
+    	// 100% Left if 0x00,
+    	// 100% right if 0xFF,
+    	// split ratio based on difference 
+    	// use equation x/0xFF and (0xFF - x)/0xFF
 
+	  
       /* ========== PIXYCAM CODE ========== */
 
       int count = Pixy2_GetBlocks(&pixy, 0xff, 10);
@@ -412,7 +478,7 @@ int main(void)
 				sig2Detected ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
 		// HAL_Delay(50);
-	  }
+
 
 	  /* Read Euler angles and Gyro without DMA*/
 	  //ReadData(&BNO055, SENSOR_EULER|SENSOR_ACCEL|SENSOR_GYRO);
@@ -424,11 +490,11 @@ int main(void)
 
 		  // Kick off the next DMA read. The CPU moves on instantly.
 		  // (Note: To ensure exactly 100Hz, I might move this trigger into a Hardware Timer)
-		  status = BNO055_Read_DMA(imu_raw_data);
+		  BNO055_status = BNO055_Read_DMA(imu_raw_data);
 
-		  if (status == HAL_OK) {
+		  if (BNO055_status == HAL_OK) {
 		        printf("DMA Request Accepted!\r\n");
-		    } else if (status == HAL_BUSY) {
+		    } else if (BNO055_status == HAL_BUSY) {
 		        printf("ERROR: I2C is Busy!\r\n");
 		    } else {
 		        printf("ERROR: DMA Request Failed!\r\n");
@@ -836,7 +902,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14|MOTOR_A_IN1_Pin|MOTOR_A_IN2_Pin|MOTOR_B_IN1_Pin
+  HAL_GPIO_WritePin(GPIOD, PIXY_CS_Pin|MOTOR_A_IN1_Pin|MOTOR_A_IN2_Pin|MOTOR_B_IN1_Pin
                           |MOTOR_B_IN2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
@@ -947,9 +1013,9 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PD14 MOTOR_A_IN1_Pin MOTOR_A_IN2_Pin MOTOR_B_IN1_Pin
+  /*Configure GPIO pins : PIXY_CS_Pin MOTOR_A_IN1_Pin MOTOR_A_IN2_Pin MOTOR_B_IN1_Pin
                            MOTOR_B_IN2_Pin */
-  GPIO_InitStruct.Pin = GPIO_PIN_14|MOTOR_A_IN1_Pin|MOTOR_A_IN2_Pin|MOTOR_B_IN1_Pin
+  GPIO_InitStruct.Pin = PIXY_CS_Pin|MOTOR_A_IN1_Pin|MOTOR_A_IN2_Pin|MOTOR_B_IN1_Pin
                           |MOTOR_B_IN2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -1076,7 +1142,7 @@ PUTCHAR_PROTOTYPE
 }
 
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c) {
-    if (hi2c->Instance == I2C1) {
+    if (hi2c->Instance == I2C2) {
 
     	// call store function to store the information
     	BNO055_DMA_store(&BNO055);
