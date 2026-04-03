@@ -263,8 +263,8 @@ void BNO055_setup() {
 
 }
 
-uint8_t PS2_RX[9];
-uint8_t PS2_TX[9] = { 0x01, 0x42};
+//uint8_t PS2_RX[9];
+//uint8_t PS2_TX[9] = { 0x01, 0x42};
 /* USER CODE END 0 */
 
 /**
@@ -415,24 +415,24 @@ int main(void)
     for (uint16_t speed = 0; speed <= 1000; speed += 10)
 	          {
 	              Motor_Set(speed, 1);   // forward
-	              HAL_Delay(20);         /* 20 ms per step → ~2 s ramp
+	              HAL_Delay(20);          20 ms per step → ~2 s ramp
 	          }
 
-	          HAL_Delay(2000);           /* hold full speed for 2 s
+	          HAL_Delay(2000);            hold full speed for 2 s
 
-	          Motor_Brake();             /* hard stop
+	          Motor_Brake();              hard stop
 	          HAL_Delay(500);
 
-	          /* Ramp up reverse
+	           Ramp up reverse
 	          for (uint16_t speed = 0; speed <= 1000; speed += 10)
 	          {
-	              Motor_Set(speed, 0);   /* reverse
+	              Motor_Set(speed, 0);    reverse
 	              HAL_Delay(20);
 	          }
 
 	          HAL_Delay(2000);
 
-	          Motor_Coast();             /* free-wheel
+	          Motor_Coast();              free-wheel
 	          HAL_Delay(500);
     
     

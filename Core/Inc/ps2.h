@@ -24,7 +24,7 @@
 // RX[3]
 #define PS2_Select   	~0b00000001 
 #define PS2_L3 		    ~0b00000010
-#define PS2_L3 		    ~0b00000100
+#define PS2_R3 		    ~0b00000100
 #define PS2_Start   	~0b00001000
 #define PS2_Up		    ~0b00010000
 #define PS2_Right    	~0b00100000
