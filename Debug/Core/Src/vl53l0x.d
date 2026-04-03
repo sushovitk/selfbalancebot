@@ -1,4 +1,4 @@
-Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
+Core/Src/vl53l0x.o: ../Core/Src/vl53l0x.c ../Core/Inc/main.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal.h \
  ../Core/Inc/stm32l4xx_hal_conf.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_rcc.h \
@@ -34,7 +34,10 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tim_ex.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h \
- ../Core/Inc/BNO055_STM32.h ../Core/Inc/calib_flash.h ../Core/Inc/pixy2.h
+ ../Core/Inc/vl53l0x_api.h ../Core/Inc/vl53l0x_api_strings.h \
+ ../Core/Inc/vl53l0x_def.h ../Core/Inc/vl53l0x_device.h \
+ ../Core/Inc/vl53l0x_types.h ../Core/Inc/vl53l0x_platform.h \
+ ../Core/Inc/vl53l0x_platform.h
 ../Core/Inc/main.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal.h:
 ../Core/Inc/stm32l4xx_hal_conf.h:
@@ -71,6 +74,10 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_tim_ex.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h:
-../Core/Inc/BNO055_STM32.h:
-../Core/Inc/calib_flash.h:
-../Core/Inc/pixy2.h:
+../Core/Inc/vl53l0x_api.h:
+../Core/Inc/vl53l0x_api_strings.h:
+../Core/Inc/vl53l0x_def.h:
+../Core/Inc/vl53l0x_device.h:
+../Core/Inc/vl53l0x_types.h:
+../Core/Inc/vl53l0x_platform.h:
+../Core/Inc/vl53l0x_platform.h:

@@ -1,0 +1,2 @@
+../Core/Src/vl53l0x.c:35:15:VL53L0X_SensorInit	24	static
+../Core/Src/vl53l0x.c:95:15:VL53L0X_ReadDistance	48	static

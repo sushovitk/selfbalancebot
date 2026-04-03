@@ -1,0 +1,3 @@
+../Core/Src/hbridge.c:21:6:Motor_Set	3
+../Core/Src/hbridge.c:40:6:Motor_Brake	1
+../Core/Src/hbridge.c:47:6:Motor_Coast	1
