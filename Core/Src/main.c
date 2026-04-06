@@ -263,8 +263,9 @@ void BNO055_setup() {
 
 }
 
-//uint8_t PS2_RX[9];
-//uint8_t PS2_TX[9] = { 0x01, 0x42};
+uint8_t PS2_RX[9];
+uint8_t PS2_TX[9] = { 0x01, 0x42};
+
 /* USER CODE END 0 */
 
 /**
@@ -310,8 +311,6 @@ int main(void)
   MX_SPI3_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
 
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);  /* Motor A */
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);  /* Motor B */
@@ -402,6 +401,24 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  /* ========== PS2 CONTROLLER CODE ========== */
+
+    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
+    HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
+    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
+
+    printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]");
+
+    // convert to position data
+    // Y DATA GIVES POWER (Forward if > 0x7b, backwards if 0x7b > )
+    // X DATA GIVES DISTRIBUTION
+    	// full to both if x == 0x7b, 
+    	// 100% Left if 0x00,
+    	// 100% right if 0xFF,
+    	// split ratio based on difference 
+    	// use equation x/0xFF and (0xFF - x)/0xFF
+
+
     status = VL53L0X_PerformSingleRangingMeasurement(Dev, &RangingData);
 
     if (status == VL53L0X_ERROR_NONE) {
@@ -437,21 +454,6 @@ int main(void)
     
     
     */
-
-	  /* ========== PS2 CONTROLLER CODE ========== */
-    uint8_t *x = 0;
-    uint8_t *y = 0;
-    read_ps2(x, y);
-
-    // convert to position data
-    // Y DATA GIVES POWER (Forward if > 0x7b, backwards if 0x7b > )
-    // X DATA GIVES DISTRIBUTION
-    	// full to both if x == 0x7b, 
-    	// 100% Left if 0x00,
-    	// 100% right if 0xFF,
-    	// split ratio based on difference 
-    	// use equation x/0xFF and (0xFF - x)/0xFF
-
 	  
       /* ========== PIXYCAM CODE ========== */
 

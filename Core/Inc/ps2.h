@@ -1,5 +1,4 @@
 #pragma once
-#include <stdint.h>
 #include "main.h"
 // RX[0] - 0xFF
 // RX[1] - 0x41 / 0x73 - we want analog (0x73)
@@ -40,7 +39,3 @@
 #define PS2_O		    ~0b00100000
 #define PS2_X		    ~0b01000000
 #define PS2_Square  	~0b10000000
-
-extern SPI_HandleTypeDef hspi3;
-
-void read_ps2(uint8_t *x, uint8_t *y);
