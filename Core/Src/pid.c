@@ -15,9 +15,9 @@ void PID_Init(PIDController *pid)
     pid->output     = 0.0f;
 
     /* Default gains — will be overwritten dynamically in PID_Update */
-    pid->Kp      = 16.0f;
-    pid->Ki      = 0.05f;
-    pid->Kd      = 0.3f;
+    pid->Kp      = 68.0f;
+    pid->Ki      = 0.0f;
+    pid->Kd      = 0.05f;
     pid->i_limit = 100.0f;
     pid->setpoint = 0.0f;    // upright = 0°. Trim this if robot leans at rest.
 }

@@ -21,7 +21,7 @@
  * PWM_MAX:      maximum duty (keep below 999 to leave headroom).
  * -------------------------------------------------------------------------- */
 #define PWM_MAX              800   // 80% duty — leave headroom for bursts
-#define PWM_MIN_DEADBAND     40    // below this motors don't move, skip it
+#define PWM_MIN_DEADBAND     372    // below this motors don't move, skip it
 
 /* ── Safety cutoff ───────────────────────────────────────────────────────────
  * If the robot tilts past this angle it cannot self-recover.
@@ -33,7 +33,7 @@
  * If pitch is within this band, brake instead of running motors.
  * Prevents buzzing/jitter when nearly balanced.
  * -------------------------------------------------------------------------- */
-#define BALANCE_DEADZONE_DEG  2.0f  // ± degrees around setpoint = brake
+#define BALANCE_DEADZONE_DEG  0.05f  // ± degrees around setpoint = brake
 
 /* ── PID controller struct ───────────────────────────────────────────────── */
 typedef struct {
