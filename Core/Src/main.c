@@ -1267,9 +1267,12 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : VL53_INT_Pin */
   GPIO_InitStruct.Pin = VL53_INT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(VL53_INT_GPIO_Port, &GPIO_InitStruct);
+	
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /*Configure GPIO pins : PE7 PE8 PE9 PE10
                            PE11 PE12 PE13 */
