@@ -571,7 +571,6 @@ int main(void)
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
-  // TODO: CONFLICTS WITH CONTROLLER
   // Ensure all LEDs start off 
 	// LD2 blue = PB7, LD3 red = PB14
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
@@ -682,7 +681,7 @@ int main(void)
     HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
 
-    printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]");
+    // printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]");
 
     // convert to position data
     // Y DATA GIVES POWER (Forward if > 0x7b, backwards if 0x7b > )
@@ -731,11 +730,11 @@ int main(void)
 		  BNO055_status = BNO055_Read_DMA(imu_raw_data);
 
       if (BNO055_status == HAL_OK) {
-		        printf("DMA Request Accepted!\r\n");
+		        // printf("DMA Request Accepted!\r\n");
 		    } else if (BNO055_status == HAL_BUSY) {
-		        printf("ERROR: I2C is Busy!\r\n");
+		        // printf("ERROR: I2C is Busy!\r\n");
 		    } else {
-		        printf("ERROR: DMA Request Failed!\r\n");
+		        // printf("ERROR: DMA Request Failed!\r\n");
 		    }
 
       if (pixy_enabled)
@@ -768,23 +767,28 @@ int main(void)
 
       if (vl53_brake_active != 0U)
       {
-        if ((int32_t)(HAL_GetTick() - vl53_brake_release_ms) >= 0)
-        {
-          vl53_brake_active = 0U;
-          vl53_threshold_latched = 0U;
-          printf("VL53 brake released\r\n");
-        }
-        else
-        {
-          MotorA_Brake();
-          MotorB_Brake();
-        }
+          if ((int32_t)(HAL_GetTick() - vl53_brake_release_ms) >= 0)
+          {
+              /* Hold period over — restore balance, re-arm VL53           */
+              vl53_brake_active      = 0U;
+              vl53_threshold_latched = 0U;
+              pixy_poll_ctr          = 0;   /* give Pixy a fresh poll cycle */
+              printf("VL53 brake released\r\n");
+              /* Fall through to normal motor drive on this same cycle     */
+          }
+          else
+          {
+              /* Still within hold period — brake and skip motor drive      */
+              MotorA_Brake();
+              MotorB_Brake();
+              /* Debug print still runs so we can see pitch during hold     */
+              printf("P:%.2f R:%.2f SP:%.2f Out:%.0f [VL53 hold]\r\n",
+                      pitch, pitch_rate, pid.setpoint, pid.output);
+              continue;   /* skip the motor-drive block below */
+          }
       }
 
-      if (vl53_brake_active != 0U) {
-        MotorA_Brake();
-        MotorB_Brake();
-      } else if (pid.output == 0.0f) {
+      if (pid.output == 0.0f) {
         /* Within deadzone and stationary — hard brake */
         MotorA_Brake();
         MotorB_Brake();
