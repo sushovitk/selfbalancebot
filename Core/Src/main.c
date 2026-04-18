@@ -41,6 +41,34 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define VL53L0X_ADDR 0x52
+
+/* ── Pixy2 tracking configuration ─────────────────────────────────────────
+ * PIXY_TRACK_SIG     : Pixy2 signature to chase (1–7, trained in PixyMon).
+ * PIXY_FRAME_CX      : Horizontal centre of the Pixy2 frame (316 px wide).
+ * PIXY_STOP_WIDTH    : Block pixel-width at which we consider the object
+ *                      "close enough" and stop driving toward it.
+ *                      Tune by placing the robot at your desired stop
+ *                      distance and reading pixy.blocks[0].width.
+ * PIXY_MIN_WIDTH     : Ignore detections narrower than this — too noisy.
+ * DRIVE_LEAN_DEG     : Setpoint offset (degrees) applied while chasing.
+ *                      Positive = lean forward → PID drives the robot forward.
+ *                      Tune together with Kp: too large → overshoot.
+ * STEER_GAIN         : Converts lateral pixel error to differential PWM.
+ *                      (lateral_err_px) * STEER_GAIN = steer_pwm_delta.
+ *                      Start small (~0.3) and increase until turns are crisp.
+ * PIXY_LOST_FRAMES   : Consecutive empty frames before tracking is cancelled
+ *                      and the setpoint returns to the balance setpoint.
+ * PIXY_POLL_DIVIDER  : Poll Pixy2 every Nth PID cycle to avoid SPI overhead
+ *                      on every IMU callback. 2 → ~50 Hz at 100 Hz PID rate.
+ * ─────────────────────────────────────────────────────────────────────────*/
+#define PIXY_TRACK_SIG       1
+#define PIXY_FRAME_CX        158
+#define PIXY_STOP_WIDTH      120
+#define PIXY_MIN_WIDTH       15
+#define DRIVE_LEAN_DEG       2.5f
+#define STEER_GAIN           0.3f
+#define PIXY_LOST_FRAMES     10
+#define PIXY_POLL_DIVIDER    2
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -82,6 +110,18 @@ Pixy2 pixy;
 
 PIDController pid;
 uint32_t last_pid_tick = 0;
+
+/* ── Pixy2 tracking state ──────────────────────────────────────────────── */
+/* steer_output         : signed differential PWM applied between motors.
+ * pixy_lost_cnt        : consecutive tracking misses before chase cancels.
+ * pixy_poll_ctr        : PID-cycle divider for Pixy polling.
+ * pixy_enabled         : true after successful Pixy2 init.
+ * pixy_balance_setpoint: tuned balance setpoint to restore when stopping. */
+static float    steer_output          = 0.0f;
+static uint8_t  pixy_lost_cnt         = 0;
+static uint8_t  pixy_poll_ctr         = 0;
+static bool     pixy_enabled          = false;
+static float    pixy_balance_setpoint = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -246,6 +286,103 @@ static inline void Pixy2_CS_Select(void) {
 }
 static inline void Pixy2_CS_Deselect(void) {
 	HAL_GPIO_WritePin(PIXY_CS_GPIO_Port, PIXY_CS_Pin, GPIO_PIN_SET);
+}
+
+/**
+ * @brief  Apply PID output + lateral steering differential to both motors.
+ *
+ * @param  output  Signed PID output. Positive = forward, negative = backward.
+ *                 Magnitude maps to PWM duty (0–PWM_MAX).
+ * @param  steer   Signed steering bias (PWM counts). Applied as +steer to
+ *                 Motor A and -steer to Motor B for differential turning.
+ *                 Motor A is the LEFT motor — if the object is to the right
+ *                 (positive lateral error) a positive steer speeds up the
+ *                 left motor and slows the right, turning right.
+ *
+ * The deadband snap is applied after mixing so both motors honour the
+ * hardware minimum. If a mixed value lands below the deadband but above
+ * zero, it is clamped up to PWM_MIN_DEADBAND so the motor actually turns.
+ */
+static void PID_Drive_Motors_Steered(float output, float steer)
+{
+    if      (output >  PWM_MAX) output =  PWM_MAX;
+    else if (output < -PWM_MAX) output = -PWM_MAX;
+
+    float outA = output + steer;
+    float outB = output - steer;
+
+    if (outA >  PWM_MAX) outA =  PWM_MAX;
+    if (outA < -PWM_MAX) outA = -PWM_MAX;
+    if (outB >  PWM_MAX) outB =  PWM_MAX;
+    if (outB < -PWM_MAX) outB = -PWM_MAX;
+
+    if (outA > 0.0f && outA < PWM_MIN_DEADBAND) outA = PWM_MIN_DEADBAND;
+    if (outA < 0.0f && outA > -PWM_MIN_DEADBAND) outA = -PWM_MIN_DEADBAND;
+    if (outB > 0.0f && outB < PWM_MIN_DEADBAND) outB = PWM_MIN_DEADBAND;
+    if (outB < 0.0f && outB > -PWM_MIN_DEADBAND) outB = -PWM_MIN_DEADBAND;
+
+    if (outA > 0.0f)       MotorA_Set((uint16_t)outA, 1);
+    else if (outA < 0.0f)  MotorA_Set((uint16_t)(-outA), 0);
+    else                   MotorA_Brake();
+
+    if (outB > 0.0f)       MotorB_Set((uint16_t)outB, 1);
+    else if (outB < 0.0f)  MotorB_Set((uint16_t)(-outB), 0);
+    else                   MotorB_Brake();
+}
+
+/**
+ * @brief  Poll the Pixy2 and update the PID setpoint + steering bias.
+ *
+ * Called every PIXY_POLL_DIVIDER PID cycles from inside the main loop.
+ * Uses the current balance setpoint as the baseline so the existing
+ * tuning remains unchanged when no target is being chased.
+ */
+static void Pixy2_UpdateTracking(PIDController *pid, float *steer_out)
+{
+    int count = Pixy2_GetBlocks(&pixy, (uint8_t)(1u << (PIXY_TRACK_SIG - 1)),
+                                 1);
+
+    if (count > 0 && pixy.blocks[0].width >= PIXY_MIN_WIDTH)
+    {
+        pixy_lost_cnt = 0;
+
+        uint16_t bw = pixy.blocks[0].width;
+        uint16_t bx = pixy.blocks[0].x;
+
+        if (bw >= PIXY_STOP_WIDTH)
+        {
+            pid->setpoint = pixy_balance_setpoint;
+            *steer_out    = 0.0f;
+            printf("PIXY: arrived (w=%u) — holding balance\r\n", bw);
+        }
+        else
+        {
+            pid->setpoint = pixy_balance_setpoint + DRIVE_LEAN_DEG;
+
+            float lateral_err = (float)bx - (float)PIXY_FRAME_CX;
+            *steer_out = lateral_err * STEER_GAIN;
+
+            if (*steer_out >  (PWM_MAX * 0.25f)) *steer_out =  (PWM_MAX * 0.25f);
+            if (*steer_out < -(PWM_MAX * 0.25f)) *steer_out = -(PWM_MAX * 0.25f);
+
+            printf("PIXY: tracking sig=%u x=%u w=%u steer=%.1f\r\n",
+                   pixy.blocks[0].signature, bx, bw, *steer_out);
+        }
+    }
+    else
+    {
+        if (pixy_lost_cnt < PIXY_LOST_FRAMES)
+        {
+            pixy_lost_cnt++;
+        }
+        else
+        {
+            if (pid->setpoint != pixy_balance_setpoint || *steer_out != 0.0f)
+                printf("PIXY: target lost — resuming balance\r\n");
+            pid->setpoint = pixy_balance_setpoint;
+            *steer_out    = 0.0f;
+        }
+    }
 }
 
 void PID_Drive_Motors(float output)
@@ -456,6 +593,7 @@ int main(void)
 	}
 
 	if (Pixy2_Init(&pixy, &hspi1, GPIOD, GPIO_PIN_14) == HAL_OK) {
+		pixy_enabled = true;
 		// 2 fast blinks on LD2 (blue) = Pixy2 init succeeded
 		for (int i = 0; i < 2; i++) {
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
@@ -463,8 +601,14 @@ int main(void)
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
 			HAL_Delay(150);
 		}
+		printf("Pixy2 init OK — fw %u.%u\r\n",
+		       pixy.version.firmware[0], pixy.version.firmware[1]);
 	} else {
-		Error_Handler();  // Rapid blink = SPI init failed
+		pixy_enabled = false;
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);
+		HAL_Delay(1000);
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+		printf("Pixy2 init FAILED — running balance-only mode\r\n");
 	}
 
     // Sensor boot up
@@ -515,6 +659,7 @@ int main(void)
 
   PID_Init(&pid);
   pid.setpoint = 3.31f;
+  pixy_balance_setpoint = pid.setpoint;
   last_pid_tick = HAL_GetTick();
 
   // start the DMA read
@@ -555,6 +700,9 @@ int main(void)
     {
       printf("STOP REQUEST LATCHED at %u mm\r\n",
              (unsigned int)vl53_last_range_mm);
+      pid.setpoint = pixy_balance_setpoint;
+      steer_output = 0.0f;
+      pixy_lost_cnt = PIXY_LOST_FRAMES;
       vl53_stop_request = 0U;
     }
     /* ============ HBRIDGE SAMPLE CODE ============
@@ -584,33 +732,6 @@ int main(void)
     
     */
 	  
-      /* ========== PIXYCAM CODE ========== */
-
-      int count = Pixy2_GetBlocks(&pixy, 0xff, 10);
-
-		uint8_t sig1Detected = 0;  // sig 1 -> LD3 red  (PB14)
-		uint8_t sig2Detected = 0;  // sig 2 -> LD2 blue (PB7)
-
-		if (count > 0) {
-			for (int i = 0; i < count; i++) {
-				if (pixy.blocks[i].signature == 2)
-					sig1Detected = 1;
-				if (pixy.blocks[i].signature == 1)
-					sig2Detected = 1;
-			}
-		}
-
-		// LD3 red = PB14: ON while signature 1 is detected
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,
-				sig1Detected ? GPIO_PIN_SET : GPIO_PIN_RESET);
-
-		// LD2 blue = PB7: ON while signature 2 is detected
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7,
-				sig2Detected ? GPIO_PIN_SET : GPIO_PIN_RESET);
-
-		// HAL_Delay(50);
-
-
 	  /* Read Euler angles and Gyro without DMA*/
 	  //ReadData(&BNO055, SENSOR_EULER|SENSOR_ACCEL|SENSOR_GYRO);
 
@@ -636,6 +757,16 @@ int main(void)
 		        printf("ERROR: DMA Request Failed!\r\n");
 		    }
 
+      if (pixy_enabled)
+      {
+          pixy_poll_ctr++;
+          if (pixy_poll_ctr >= PIXY_POLL_DIVIDER)
+          {
+              pixy_poll_ctr = 0;
+              Pixy2_UpdateTracking(&pid, &steer_output);
+          }
+      }
+
       /* Get pitch and pitch rate from BNO055 */
       float pitch      = BNO055.Euler.Z;    /* degrees from vertical */
       float pitch_rate = -BNO055.Gyro.X;     /* degrees/sec, used as D term */
@@ -647,6 +778,9 @@ int main(void)
         /* Robot fell past recovery angle */
     	MotorA_Brake();
     	MotorB_Brake();
+        pid.setpoint = pixy_balance_setpoint;
+        steer_output = 0.0f;
+        pixy_lost_cnt = PIXY_LOST_FRAMES;
         printf("FALLEN — STOPPED | Pitch: %.2f\r\n", pitch);
         continue;
       }
@@ -657,12 +791,12 @@ int main(void)
         MotorB_Brake();
       } else {
         /* Drive motors using signed PID output                      */
-        PID_Drive_Motors(pid.output);
+        PID_Drive_Motors_Steered(pid.output, steer_output);
       }
 
       /* ── Debug print — remove when tuning is done ───────────────── */
-      printf("P:%.2f R:%.2f Out:%.0f\r\n",
-              pitch, pitch_rate, pid.output);
+      printf("P:%.2f R:%.2f SP:%.2f Out:%.0f Steer:%.0f\r\n",
+              pitch, pitch_rate, pid.setpoint, pid.output, steer_output);
       
 
 
