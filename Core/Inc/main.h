@@ -61,6 +61,7 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define VL53_INT_Pin GPIO_PIN_13
 #define VL53_INT_GPIO_Port GPIOF
+#define VL53_INT_EXTI_IRQn EXTI15_10_IRQn
 #define PIXY_CS_Pin GPIO_PIN_14
 #define PIXY_CS_GPIO_Port GPIOD
 #define MOTOR_A_IN1_Pin GPIO_PIN_4

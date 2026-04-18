@@ -2,6 +2,17 @@
  * pid.c
  * Self-balancing PID controller for STM32L4R5ZI + BNO055 + L298 H-Bridge
  *
+ * Key changes vs original:
+ *  - PID_SetTarget()   : sets setpoint_target + soft-resets integral on big
+ *                        setpoint changes to stop windup carrying over.
+ *  - PID_RampSetpoint(): advances setpoint toward setpoint_target at a
+ *                        controlled rate (SETPOINT_RAMP_RATE_DEG_S) so the
+ *                        Pixy2 lean command never creates a sudden error spike.
+ *  - PID_SoftReset()   : halves integral instead of zeroing it, reducing
+ *                        windup while keeping some history when transitioning.
+ *  - PID_Update()      : dt is now expected to be pre-clamped by the caller
+ *                        (DT_MIN_S … DT_MAX_S) so SPI/printf stalls don't
+ *                        cause rogue I/D kicks.
  */
 
 #include "pid.h"
@@ -10,19 +21,19 @@
 /* ── Init ─────────────────────────────────────────────────────────────────── */
 void PID_Init(PIDController *pid)
 {
-    pid->integral   = 0.0f;
-    pid->prev_error = 0.0f;
-    pid->output     = 0.0f;
+    pid->integral        = 0.0f;
+    pid->prev_error      = 0.0f;
+    pid->output          = 0.0f;
+    pid->setpoint        = 0.0f;
+    pid->setpoint_target = 0.0f;
 
-    /* Default gains — will be overwritten dynamically in PID_Update */
-    pid->Kp      = 65.0f; // 55
-    pid->Ki      = 0.02f; // 0.2
-    pid->Kd      = 0.60f; // 2.5
+    pid->Kp      = 65.0f;
+    pid->Ki      = 0.02f;
+    pid->Kd      = 0.60f;
     pid->i_limit = 100.0f;
-    pid->setpoint = 0.0f;    // upright = 0°. Trim this if robot leans at rest.
 }
 
-/* ── Reset (call after fall or brake) ─────────────────────────────────────── */
+/* ── Hard Reset (call after fall or brake) ─────────────────────────────────── */
 void PID_Reset(PIDController *pid)
 {
     pid->integral   = 0.0f;
@@ -30,67 +41,99 @@ void PID_Reset(PIDController *pid)
     pid->output     = 0.0f;
 }
 
+/* ── Soft Reset (call after large setpoint change) ───────────────────────── */
+/*
+ * Halving the integral (rather than zeroing it) keeps some "memory" of
+ * the motor effort needed to balance at the current angle while removing
+ * the windup that accumulated at the old setpoint.  This gives a smoother
+ * transition than a hard reset and avoids the sudden lurch in the opposite
+ * direction that a zero-reset can cause.
+ */
+void PID_SoftReset(PIDController *pid)
+{
+    pid->integral *= 0.5f;
+}
+
+/* ── Set Target Setpoint ─────────────────────────────────────────────────── */
+/*
+ * Always use this instead of writing pid->setpoint directly from the Pixy2
+ * tracking code.  It records the desired angle in setpoint_target so the
+ * main loop can ramp setpoint smoothly, and calls PID_SoftReset() when the
+ * change is large enough to cause significant windup.
+ */
+void PID_SetTarget(PIDController *pid, float target)
+{
+    /* Only soft-reset the integral when the target changes noticeably.     */
+    /* A 1° threshold avoids triggering on floating-point noise.            */
+    if (fabsf(target - pid->setpoint_target) > 1.0f)
+    {
+        PID_SoftReset(pid);
+    }
+    pid->setpoint_target = target;
+}
+
+/* ── Ramp Setpoint ───────────────────────────────────────────────────────── */
+/*
+ * Advance pid->setpoint one dt-step toward pid->setpoint_target at a rate
+ * of SETPOINT_RAMP_RATE_DEG_S degrees per second.
+ *
+ * Call this BEFORE PID_Update() each cycle.
+ *
+ * Why this matters:
+ *   Without ramping, switching from balance (3.31°) to chase (5.81°) creates
+ *   a 2.5° step error.  With Kp=65, that is an instant 162-count PWM spike —
+ *   enough to lurch the robot and start filling the integral the wrong way.
+ *   At 5 deg/s, the same transition takes 0.5 s and the PID error never
+ *   exceeds ~0.05° per cycle at 100 Hz, which is well within the proportional
+ *   band the gains were tuned for.
+ */
+void PID_RampSetpoint(PIDController *pid, float dt)
+{
+    float step = SETPOINT_RAMP_RATE_DEG_S * dt;
+    float diff = pid->setpoint_target - pid->setpoint;
+
+    if (diff > step)
+        pid->setpoint += step;
+    else if (diff < -step)
+        pid->setpoint -= step;
+    else
+        pid->setpoint = pid->setpoint_target;  /* snap when close */
+}
+
 /* ── Update ───────────────────────────────────────────────────────────────── */
 bool PID_Update(PIDController *pid, float pitch, float pitch_rate, float dt)
 {
-    /* Guard against bad dt (first call, timer wrap, etc.) */
-    if (dt <= 0.0f || dt > 0.5f) dt = 0.01f;
+    /*
+     * dt is clamped by the caller (main.c) to [DT_MIN_S, DT_MAX_S].
+     * The guard below is a last-resort safety net only.
+     */
+    if (dt < DT_MIN_S) dt = DT_MIN_S;
+    if (dt > DT_MAX_S) dt = DT_MAX_S;
 
     float abs_pitch = fabsf(pitch - pid->setpoint);
 
     /* ── Safety cutoff ──────────────────────────────────────────────────── */
-    /* Robot has fallen too far — cannot recover. Stop everything.          */
-    if (abs_pitch > BALANCE_CUTOFF_DEG) {
+    if (abs_pitch > BALANCE_CUTOFF_DEG)
+    {
         PID_Reset(pid);
-        return false;   /* caller should brake motors */
+        return false;
     }
 
     /* ── Dead zone brake ────────────────────────────────────────────────── */
-    /* Very close to upright — just brake, no buzzing from tiny corrections */
-    // only stop the motor if robot is not moving
-    if (abs_pitch < BALANCE_DEADZONE_DEG) {
+    /*
+     * Only stop inside the deadzone when the setpoint is NOT actively being
+     * ramped toward a different target.  While chasing, a small deadzone
+     * error should still be corrected; the lean provides the drive force.
+     */
+    if (abs_pitch < BALANCE_DEADZONE_DEG &&
+        fabsf(pid->setpoint - pid->setpoint_target) < BALANCE_DEADZONE_DEG)
+    {
         pid->output = 0.0f;
         return true;
     }
 
-    /* ── Dynamic gain scheduling ────────────────────────────────────────── */
-    /* Gains and limits change based on how far the robot is tilted.        */
-    /* Larger tilt → more aggressive correction, tighter integral limit.    */
-    /* (Adapted from Arduino BNO055 reference)                              */
-    /* TEMPORARILY COMMENTED OUT FOR ZIEGLER-NICHOLS TUNING
-    if (abs_pitch > 20.0f) {
-        // Far tilt — aggressive
-        pid->Kp      = 20.0f;
-        pid->Ki      = 0.05f;
-        pid->Kd      = 0.6f;
-        pid->i_limit = 50.0f;
-    }
-    else if (abs_pitch > 8.0f) {
-        // Medium tilt — moderate
-        pid->Kp      = 16.0f;
-        pid->Ki      = 0.05f;
-        pid->Kd      = 0.3f;
-        pid->i_limit = 100.0f;
-    }
-    else {
-        // Near upright — gentle, more integral authority
-        pid->Kp      = 12.0f;
-        pid->Ki      = 0.05f;
-        pid->Kd      = 0.2f;
-        pid->i_limit = 175.0f;
-    }
-
-
-    // ── Extra derivative damping when rotating fast ────────────────────── //
-    // If the robot is spinning quickly toward a fall, damp harder.
-    if (fabsf(pitch_rate) > 50.0f) {
-        pid->Kd += 0.2f;
-    }
-    */
-
     /* ── PID computation ─────────────────────────────────────────────────── */
 
-    /* Signed error — MUST keep sign so robot knows which way to correct    */
     float error = pid->setpoint - pitch;
 
     /* Proportional */
@@ -99,24 +142,19 @@ bool PID_Update(PIDController *pid, float pitch, float pitch_rate, float dt)
     /* Integral with anti-windup clamping */
     pid->integral += error * dt;
 
-    if(pid->integral >  pid->i_limit) 
-    {
-        pid->integral =  pid->i_limit;
-    } 
-    else if(pid->integral < -pid->i_limit)
-    { 
-        pid->integral = -pid->i_limit;
-    }
+    if      (pid->integral >  pid->i_limit) pid->integral =  pid->i_limit;
+    else if (pid->integral < -pid->i_limit) pid->integral = -pid->i_limit;
 
     float I = pid->Ki * pid->integral;
 
-    /* Derivative — use gyro rate directly, NOT (error-lastError)/dt.
+    /*
+     * Derivative — use gyro rate directly, NOT (error-lastError)/dt.
      * Gyro gives smooth angular velocity; finite difference on angle
-     * amplifies sensor noise. Negate because pitch_rate > 0 means
-     * falling in the positive direction — we want to resist that.         */
+     * amplifies sensor noise.  Negate because pitch_rate > 0 means
+     * falling in the positive direction — we want to resist that.
+     */
     float D = -pid->Kd * pitch_rate;
 
-    /* Total output — SIGNED: positive = drive forward, negative = backward */
     pid->output     = P + I + D;
     pid->prev_error = error;
 
