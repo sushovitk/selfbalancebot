@@ -69,6 +69,8 @@
 #define STEER_GAIN           0.3f
 #define PIXY_LOST_FRAMES     10
 #define PIXY_POLL_DIVIDER    2
+
+#define VL53_BRAKE_HOLD_MS   1000U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -96,6 +98,8 @@ volatile uint8_t vl53_irq_pending = 0;
 volatile uint8_t vl53_stop_request = 0;
 volatile uint8_t vl53_threshold_latched = 0;
 uint16_t vl53_last_range_mm = 0;
+static uint8_t  vl53_brake_active = 0;
+static uint32_t vl53_brake_release_ms = 0;
 uint8_t OffsetDatas[22];
 BNO055_Sensors_t BNO055;
 uint8_t imu_raw_data[24];              // DMA dumps the 24 bytes here
@@ -705,38 +709,13 @@ int main(void)
       pixy_lost_cnt = PIXY_LOST_FRAMES;
       MotorA_Brake();
       MotorB_Brake();
+      vl53_brake_active = 1U;
+      vl53_brake_release_ms = HAL_GetTick() + VL53_BRAKE_HOLD_MS;
       vl53_stop_request = 0U;
     }
-    /* ============ HBRIDGE SAMPLE CODE ============
-    for (uint16_t speed = 0; speed <= 1000; speed += 10)
-	          {
-	              Motor_Set(speed, 1);   // forward
-	              HAL_Delay(20);          20 ms per step → ~2 s ramp
-	          }
 
-	          HAL_Delay(2000);            hold full speed for 2 s
-
-	          Motor_Brake();              hard stop
-	          HAL_Delay(500);
-
-	           Ramp up reverse
-	          for (uint16_t speed = 0; speed <= 1000; speed += 10)
-	          {
-	              Motor_Set(speed, 0);    reverse
-	              HAL_Delay(20);
-	          }
-
-	          HAL_Delay(2000);
-
-	          Motor_Coast();              free-wheel
-	          HAL_Delay(500);
-    
-    
-    */
-	  
 	  /* Read Euler angles and Gyro without DMA*/
 	  //ReadData(&BNO055, SENSOR_EULER|SENSOR_ACCEL|SENSOR_GYRO);
-
 
 	  if(imu_data_ready) {
 		  // Immediately clear the flag
@@ -771,7 +750,7 @@ int main(void)
 
       /* Get pitch and pitch rate from BNO055 */
       float pitch      = BNO055.Euler.Z;    /* degrees from vertical */
-      float pitch_rate = -BNO055.Gyro.X;     /* degrees/sec, used as D term */
+      float pitch_rate = -BNO055.Gyro.X;    /* degrees/sec, used as D term */
 
       /* ── PID Control ────────────────────────────────── */
       bool ok = PID_Update(&pid, pitch, pitch_rate, dt);
@@ -787,25 +766,36 @@ int main(void)
         continue;
       }
 
-      if (vl53_threshold_latched != 0U) {
+      if (vl53_brake_active != 0U)
+      {
+        if ((int32_t)(HAL_GetTick() - vl53_brake_release_ms) >= 0)
+        {
+          vl53_brake_active = 0U;
+          vl53_threshold_latched = 0U;
+          printf("VL53 brake released\r\n");
+        }
+        else
+        {
+          MotorA_Brake();
+          MotorB_Brake();
+        }
+      }
+
+      if (vl53_brake_active != 0U) {
         MotorA_Brake();
         MotorB_Brake();
       } else if (pid.output == 0.0f) {
-        /* Within deadzone and stationary — hard brake               */
+        /* Within deadzone and stationary — hard brake */
         MotorA_Brake();
         MotorB_Brake();
       } else {
-        /* Drive motors using signed PID output                      */
+        /* Drive motors using signed PID output */
         PID_Drive_Motors_Steered(pid.output, steer_output);
       }
 
       /* ── Debug print — remove when tuning is done ───────────────── */
       printf("P:%.2f R:%.2f SP:%.2f Out:%.0f Steer:%.0f\r\n",
               pitch, pitch_rate, pid.setpoint, pid.output, steer_output);
-      
-
-
-
 	  }
 
 	  /* ── Euler Angles (degrees) ──────────────────────────────── */
