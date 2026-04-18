@@ -64,6 +64,10 @@ TIM_HandleTypeDef htim2;
 /* USER CODE BEGIN PV */
 VL53L0X_Dev_t vl53_dev;
 VL53L0X_DEV Dev = &vl53_dev;
+volatile uint8_t vl53_irq_pending = 0;
+volatile uint8_t vl53_stop_request = 0;
+volatile uint8_t vl53_threshold_latched = 0;
+uint16_t vl53_last_range_mm = 0;
 uint8_t OffsetDatas[22];
 BNO055_Sensors_t BNO055;
 uint8_t imu_raw_data[24];              // DMA dumps the 24 bytes here
@@ -91,11 +95,86 @@ static void MX_I2C2_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
-
+static VL53L0X_Error VL53L0X_InterruptMode_Init(void);
+static void VL53L0X_HandleThresholdEvent(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static VL53L0X_Error VL53L0X_InterruptMode_Init(void)
+{
+  VL53L0X_Error status;
+  const FixPoint1616_t threshold_low = (FixPoint1616_t)(300U << 16);
+  const FixPoint1616_t threshold_high = 0;
+
+  status = VL53L0X_SetDeviceMode(Dev, VL53L0X_DEVICEMODE_CONTINUOUS_RANGING);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    return status;
+  }
+
+  status = VL53L0X_SetInterruptThresholds(
+      Dev,
+      VL53L0X_DEVICEMODE_CONTINUOUS_RANGING,
+      threshold_low,
+      threshold_high);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    return status;
+  }
+
+  status = VL53L0X_SetGpioConfig(
+      Dev,
+      0,
+      VL53L0X_DEVICEMODE_CONTINUOUS_RANGING,
+      VL53L0X_GPIOFUNCTIONALITY_THRESHOLD_CROSSED_LOW,
+      VL53L0X_INTERRUPTPOLARITY_LOW);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    return status;
+  }
+
+  status = VL53L0X_ClearInterruptMask(Dev, 0);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    return status;
+  }
+
+  return VL53L0X_StartMeasurement(Dev);
+}
+
+static void VL53L0X_HandleThresholdEvent(void)
+{
+  VL53L0X_Error status;
+  VL53L0X_RangingMeasurementData_t ranging_data;
+
+  status = VL53L0X_GetRangingMeasurementData(Dev, &ranging_data);
+
+  if (status == VL53L0X_ERROR_NONE)
+  {
+    vl53_last_range_mm = ranging_data.RangeMilliMeter;
+
+    if ((ranging_data.RangeStatus == 0U) &&
+        (ranging_data.RangeMilliMeter <= 300U))
+    {
+      vl53_stop_request = 1U;
+      vl53_threshold_latched = 1U;
+
+      printf("VL53L0X threshold interrupt: %u mm\r\n",
+             (unsigned int)ranging_data.RangeMilliMeter);
+    }
+  }
+  else
+  {
+    printf("VL53L0X interrupt read failed: %d\r\n", status);
+  }
+
+  status = VL53L0X_ClearInterruptMask(Dev, 0);
+  if (status != VL53L0X_ERROR_NONE)
+  {
+    printf("VL53L0X clear interrupt failed: %d\r\n", status);
+  }
+}
 
 // ============ MOTOR AND HBRIDGE USER CODE 0 ============
 /**
@@ -314,7 +393,6 @@ int main(void)
 	uint8_t isApertureSpads = 0;
 	uint8_t VhvSettings = 0;
 	uint8_t PhaseCal = 0;
-	VL53L0X_RangingMeasurementData_t RangingData;
 
   /* USER CODE END 1 */
 
@@ -426,14 +504,14 @@ int main(void)
     Error_Handler();
   }
 
-  status = VL53L0X_SetDeviceMode(Dev, VL53L0X_DEVICEMODE_SINGLE_RANGING);
+  status = VL53L0X_InterruptMode_Init();
   if (status != VL53L0X_ERROR_NONE)
   {
-    printf("SetDeviceMode failed: %d\r\n", status);
+    printf("VL53L0X interrupt init failed: %d\r\n", status);
     Error_Handler();
   }
 
-  printf("VL53L0X ready\r\n");
+  printf("VL53L0X interrupt mode ready\r\n");
 
   PID_Init(&pid);
   pid.setpoint = 3.31f;
@@ -467,15 +545,17 @@ int main(void)
     	// use equation x/0xFF and (0xFF - x)/0xFF
 
 
-    /*VL53L0X code*/
-    status = VL53L0X_PerformSingleRangingMeasurement(Dev, &RangingData);
-
-    if (status == VL53L0X_ERROR_NONE) {
-      printf("Distance = %u mm\r\n",
-             (unsigned int)RangingData.RangeMilliMeter);
-    } else
+    if (vl53_irq_pending != 0U)
     {
-      printf("Measurement failed: %d\r\n", status);
+      vl53_irq_pending = 0U;
+      VL53L0X_HandleThresholdEvent();
+    }
+
+    if (vl53_stop_request != 0U)
+    {
+      printf("STOP REQUEST LATCHED at %u mm\r\n",
+             (unsigned int)vl53_last_range_mm);
+      vl53_stop_request = 0U;
     }
     /* ============ HBRIDGE SAMPLE CODE ============
     for (uint16_t speed = 0; speed <= 1000; speed += 10)
@@ -1053,11 +1133,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PF13 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pin : VL53_INT_Pin */
+  GPIO_InitStruct.Pin = VL53_INT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+  HAL_GPIO_Init(VL53_INT_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PE7 PE8 PE9 PE10
                            PE11 PE12 PE13 */
@@ -1205,6 +1285,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF2_TIM4;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 	GPIO_InitStruct.Pin = GPIO_PIN_7 | GPIO_PIN_14;  // LD2 blue | LD3 red
 	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -1239,6 +1323,15 @@ void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c) {
         imu_data_ready = true;
     }
 }
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if ((GPIO_Pin == VL53_INT_Pin) && (vl53_threshold_latched == 0U))
+  {
+    vl53_irq_pending = 1U;
+  }
+}
+
 /* USER CODE END 4 */
 
 /**
