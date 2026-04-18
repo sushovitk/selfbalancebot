@@ -39,7 +39,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Core/Inc/vl53l0x_types.h ../Core/Inc/vl53l0x_platform.h \
  ../Core/Inc/vl53l0x_platform.h ../Core/Inc/BNO055_STM32.h \
  ../Core/Inc/calib_flash.h ../Core/Inc/pixy2.h ../Core/Inc/ps2.h \
- ../Core/Inc/main.h
+ ../Core/Inc/main.h ../Core/Inc/pid.h
 ../Core/Inc/main.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal.h:
 ../Core/Inc/stm32l4xx_hal_conf.h:
@@ -88,3 +88,4 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Core/Inc/pixy2.h:
 ../Core/Inc/ps2.h:
 ../Core/Inc/main.h:
+../Core/Inc/pid.h:

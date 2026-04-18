@@ -17,7 +17,7 @@
 ../Core/Inc/Pixy2CCC.h:74:8:int8_t Pixy2CCC<LinkType>::getBlocks(bool, uint8_t, uint8_t) [with LinkType = Link2SPI_SS]	7
 ../Core/Inc/TPixy2.h:388:34:int8_t TPixy2<LinkType>::setLED(uint8_t, uint8_t, uint8_t) [with LinkType = Link2SPI_SS]	5
 ../Core/Inc/Pixy2CCC.h:57:5:Pixy2CCC<LinkType>::Pixy2CCC(TPixy2<LinkType>*) [with LinkType = Link2SPI_SS]	1
-../Core/Inc/Pixy2Line.h:88:2:Pixy2Line<LinkType>::Pixy2Line(TPixy2<LinkType>*) [with LinkType = Link2SPI_SS]	1
+../Core/Inc/Pixy2Line.h:87:2:Pixy2Line<LinkType>::Pixy2Line(TPixy2<LinkType>*) [with LinkType = Link2SPI_SS]	1
 ../Core/Inc/Pixy2Video.h:21:5:Pixy2Video<LinkType>::Pixy2Video(TPixy2<LinkType>*) [with LinkType = Link2SPI_SS]	1
 ../Core/Inc/TPixy2.h:343:34:int8_t TPixy2<LinkType>::getResolution() [with LinkType = Link2SPI_SS]	3
 ../Core/Inc/TPixy2.h:289:35:int16_t TPixy2<LinkType>::sendPacket() [with LinkType = Link2SPI_SS]	1

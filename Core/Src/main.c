@@ -681,7 +681,7 @@ int main(void)
     HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
 
-    // printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]");
+    // printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
 
     // convert to position data
     // Y DATA GIVES POWER (Forward if > 0x7b, backwards if 0x7b > )
@@ -701,8 +701,7 @@ int main(void)
 
     if (vl53_stop_request != 0U)
     {
-      printf("STOP REQUEST LATCHED at %u mm\r\n",
-             (unsigned int)vl53_last_range_mm);
+      // printf("STOP REQUEST LATCHED at %u mm\r\n", (unsigned int)vl53_last_range_mm);
       pid.setpoint = pixy_balance_setpoint;
       steer_output = 0.0f;
       pixy_lost_cnt = PIXY_LOST_FRAMES;
@@ -1268,7 +1267,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : VL53_INT_Pin */
   GPIO_InitStruct.Pin = VL53_INT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(VL53_INT_GPIO_Port, &GPIO_InitStruct);
 
@@ -1417,10 +1416,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF2_TIM4;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 	GPIO_InitStruct.Pin = GPIO_PIN_7 | GPIO_PIN_14;  // LD2 blue | LD3 red

@@ -84,8 +84,8 @@ all: main-build
 main-build: selfbalancingbot.elf secondary-outputs
 
 # Tool invocations
-selfbalancingbot.elf selfbalancingbot.map: $(OBJS) $(USER_OBJS) /Users/susho/STM32CubeIDE/workspace_1.19.0/selfbalancingbot/STM32L4R5ZITXP_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-g++ -o "selfbalancingbot.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/susho/STM32CubeIDE/workspace_1.19.0/selfbalancingbot/STM32L4R5ZITXP_FLASH.ld" --specs=nosys.specs -Wl,-Map="selfbalancingbot.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -lstdc++ -lsupc++ -Wl,--end-group
+selfbalancingbot.elf selfbalancingbot.map: $(OBJS) $(USER_OBJS) /Users/yanleichen/STM32CubeIDE/workspace_1.19.0/selfbalancingbot/STM32L4R5ZITXP_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-g++ -o "selfbalancingbot.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/yanleichen/STM32CubeIDE/workspace_1.19.0/selfbalancingbot/STM32L4R5ZITXP_FLASH.ld" -Wl,-Map="selfbalancingbot.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -lstdc++ -lsupc++ -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

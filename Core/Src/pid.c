@@ -15,7 +15,7 @@ void PID_Init(PIDController *pid)
     pid->output     = 0.0f;
 
     /* Default gains — will be overwritten dynamically in PID_Update */
-    pid->Kp      = 5.0f; // 55
+    pid->Kp      = 65.0f; // 55
     pid->Ki      = 0.02f; // 0.2
     pid->Kd      = 0.60f; // 2.5
     pid->i_limit = 100.0f;

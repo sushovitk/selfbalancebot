@@ -34,7 +34,7 @@ struct Block
 {
     // print() body removed: Serial is not available on STM32.
     // Implement a UART/ITM redirect and add your own output here if needed.
-    void print() {}
+    // void print() {}
 
     uint16_t m_signature;
     uint16_t m_x;

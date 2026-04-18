@@ -57,8 +57,8 @@ struct IntersectionLine {
 };
 
 struct Intersection {
-	void print() {
-	}   // Serial.println removed
+	//void print(){}
+	   // Serial.println removed
 
 	uint8_t m_x;
 	uint8_t m_y;
@@ -68,8 +68,7 @@ struct Intersection {
 };
 
 struct Barcode {
-	void print() {
-	}   // Serial.println removed
+	//void print() { }   // Serial.println removed
 
 	uint8_t m_x;
 	uint8_t m_y;
