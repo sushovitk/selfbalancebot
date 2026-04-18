@@ -703,6 +703,8 @@ int main(void)
       pid.setpoint = pixy_balance_setpoint;
       steer_output = 0.0f;
       pixy_lost_cnt = PIXY_LOST_FRAMES;
+      MotorA_Brake();
+      MotorB_Brake();
       vl53_stop_request = 0U;
     }
     /* ============ HBRIDGE SAMPLE CODE ============
@@ -785,7 +787,10 @@ int main(void)
         continue;
       }
 
-      if (pid.output == 0.0f) {
+      if (vl53_threshold_latched != 0U) {
+        MotorA_Brake();
+        MotorB_Brake();
+      } else if (pid.output == 0.0f) {
         /* Within deadzone and stationary — hard brake               */
         MotorA_Brake();
         MotorB_Brake();
