@@ -33,7 +33,7 @@
  * If pitch is within this band, brake instead of running motors.
  * Prevents buzzing/jitter when nearly balanced.
  * -------------------------------------------------------------------------- */
-#define BALANCE_DEADZONE_DEG  0.05f  // ± degrees around setpoint = brake
+#define BALANCE_DEADZONE_DEG  0.5f  // ± degrees around setpoint = brake
 
 /* ── PID controller struct ───────────────────────────────────────────────── */
 typedef struct {

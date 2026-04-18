@@ -15,9 +15,9 @@ void PID_Init(PIDController *pid)
     pid->output     = 0.0f;
 
     /* Default gains — will be overwritten dynamically in PID_Update */
-    pid->Kp      = 68.0f;
-    pid->Ki      = 0.0f;
-    pid->Kd      = 0.05f;
+    pid->Kp      = 5.0f; // 55
+    pid->Ki      = 0.02f; // 0.2
+    pid->Kd      = 0.60f; // 2.5
     pid->i_limit = 100.0f;
     pid->setpoint = 0.0f;    // upright = 0°. Trim this if robot leans at rest.
 }
@@ -47,42 +47,46 @@ bool PID_Update(PIDController *pid, float pitch, float pitch_rate, float dt)
 
     /* ── Dead zone brake ────────────────────────────────────────────────── */
     /* Very close to upright — just brake, no buzzing from tiny corrections */
+    // only stop the motor if robot is not moving
     if (abs_pitch < BALANCE_DEADZONE_DEG) {
         pid->output = 0.0f;
-        return true;    /* output = 0 signals caller to brake */
+        return true;
     }
 
     /* ── Dynamic gain scheduling ────────────────────────────────────────── */
     /* Gains and limits change based on how far the robot is tilted.        */
     /* Larger tilt → more aggressive correction, tighter integral limit.    */
     /* (Adapted from Arduino BNO055 reference)                              */
+    /* TEMPORARILY COMMENTED OUT FOR ZIEGLER-NICHOLS TUNING
     if (abs_pitch > 20.0f) {
-        /* Far tilt — aggressive */
+        // Far tilt — aggressive
         pid->Kp      = 20.0f;
         pid->Ki      = 0.05f;
         pid->Kd      = 0.6f;
         pid->i_limit = 50.0f;
     }
     else if (abs_pitch > 8.0f) {
-        /* Medium tilt — moderate */
+        // Medium tilt — moderate
         pid->Kp      = 16.0f;
         pid->Ki      = 0.05f;
         pid->Kd      = 0.3f;
         pid->i_limit = 100.0f;
     }
     else {
-        /* Near upright — gentle, more integral authority */
+        // Near upright — gentle, more integral authority
         pid->Kp      = 12.0f;
         pid->Ki      = 0.05f;
         pid->Kd      = 0.2f;
         pid->i_limit = 175.0f;
     }
 
-    /* ── Extra derivative damping when rotating fast ────────────────────── */
-    /* If the robot is spinning quickly toward a fall, damp harder.         */
+
+    // ── Extra derivative damping when rotating fast ────────────────────── //
+    // If the robot is spinning quickly toward a fall, damp harder.
     if (fabsf(pitch_rate) > 50.0f) {
         pid->Kd += 0.2f;
     }
+    */
 
     /* ── PID computation ─────────────────────────────────────────────────── */
 
@@ -94,7 +98,7 @@ bool PID_Update(PIDController *pid, float pitch, float pitch_rate, float dt)
 
     /* Integral with anti-windup clamping */
     pid->integral += error * dt;
-    
+
     if(pid->integral >  pid->i_limit) 
     {
         pid->integral =  pid->i_limit;

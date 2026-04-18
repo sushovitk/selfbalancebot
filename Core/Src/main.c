@@ -29,6 +29,7 @@
 #include "calib_flash.h"
 #include "pixy2.h"
 #include "ps2.h"
+#include "pid.h"
 
 /* USER CODE END Includes */
 
@@ -74,6 +75,9 @@ volatile bool imu_data_ready = false; // Flag to tell the main loop data is fres
 #define PIXY2_RECV_SYNC_BYTE2 0xc1
 
 Pixy2 pixy;
+
+PIDController pid;
+uint32_t last_pid_tick = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -163,6 +167,35 @@ static inline void Pixy2_CS_Select(void) {
 }
 static inline void Pixy2_CS_Deselect(void) {
 	HAL_GPIO_WritePin(PIXY_CS_GPIO_Port, PIXY_CS_Pin, GPIO_PIN_SET);
+}
+
+void PID_Drive_Motors(float output)
+{
+    /* Hard clamp to PWM_MAX defined in pid.h (800) */
+    if      (output >  PWM_MAX) output =  PWM_MAX;
+    else if (output < -PWM_MAX) output = -PWM_MAX;
+ 
+    /* Below deadband motors don't actually spin — skip to avoid buzzing */
+    if (output > 0.0f && output <  PWM_MIN_DEADBAND) output =  PWM_MIN_DEADBAND;
+    if (output < 0.0f && output > -PWM_MIN_DEADBAND) output = -PWM_MIN_DEADBAND;
+ 
+    uint16_t duty = (uint16_t)fabsf(output);
+ 
+    if (output > 0.0f) {
+        /* Drive FORWARD — both motors forward */
+        MotorA_Set(duty, 1);
+        MotorB_Set(duty, 1);
+    }
+    else if (output < 0.0f) {
+        /* Drive BACKWARD — both motors reverse */
+        MotorA_Set(duty, 0);
+        MotorB_Set(duty, 0);
+    }
+    else {
+        /* Hard brake — robot is in deadzone */
+        MotorA_Brake();
+        MotorB_Brake();
+    }
 }
 
 void Sensor_Init(void)
@@ -327,10 +360,15 @@ int main(void)
 
   // initialize the sensor
   BNO055_setup();
-      
-  // start the DMA read
-  HAL_StatusTypeDef BNO055_status = BNO055_Read_DMA(imu_raw_data);
 
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);   /* Motor A enable */
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);   /* Motor B enable */
+ 
+  /* Start with both motors braked */
+  MotorA_Brake();
+  MotorB_Brake();
+
+  /*pixy init*/
   // 3 slow blinks on LD2 (blue) = board alive, about to attempt Pixy2 init
 	for (int i = 0; i < 3; i++) {
 		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
@@ -354,6 +392,7 @@ int main(void)
     // Sensor boot up
   HAL_Delay(10);
 
+  /*VL53l0x*/
   memset(&vl53_dev, 0, sizeof(vl53_dev));
   Dev->I2cDevAddr = VL53L0X_ADDR;
   Dev->comms_type = 1;
@@ -395,6 +434,14 @@ int main(void)
   }
 
   printf("VL53L0X ready\r\n");
+
+  PID_Init(&pid);
+  pid.setpoint = 3.31f;
+  last_pid_tick = HAL_GetTick();
+
+  // start the DMA read
+  HAL_StatusTypeDef BNO055_status = BNO055_Read_DMA(imu_raw_data);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -403,6 +450,7 @@ int main(void)
   {
 	  /* ========== PS2 CONTROLLER CODE ========== */
 
+    /*PS2 code*/
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
     HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_6);
@@ -419,6 +467,7 @@ int main(void)
     	// use equation x/0xFF and (0xFF - x)/0xFF
 
 
+    /*VL53L0X code*/
     status = VL53L0X_PerformSingleRangingMeasurement(Dev, &RangingData);
 
     if (status == VL53L0X_ERROR_NONE) {
@@ -490,17 +539,54 @@ int main(void)
 		  // Immediately clear the flag
 		  imu_data_ready = false;
 
+      // compute delta time
+      uint32_t now = HAL_GetTick();
+      float dt = (now - last_pid_tick) / 1000.0f;
+      last_pid_tick = now;
+
 		  // Kick off the next DMA read. The CPU moves on instantly.
-		  // (Note: To ensure exactly 100Hz, I might move this trigger into a Hardware Timer)
+		  // (Note: To ensure exactly 100Hz, we might move this trigger into a Hardware Timer)
 		  BNO055_status = BNO055_Read_DMA(imu_raw_data);
 
-		  if (BNO055_status == HAL_OK) {
+      if (BNO055_status == HAL_OK) {
 		        printf("DMA Request Accepted!\r\n");
 		    } else if (BNO055_status == HAL_BUSY) {
 		        printf("ERROR: I2C is Busy!\r\n");
 		    } else {
 		        printf("ERROR: DMA Request Failed!\r\n");
 		    }
+
+      /* Get pitch and pitch rate from BNO055 */
+      float pitch      = BNO055.Euler.Z;    /* degrees from vertical */
+      float pitch_rate = -BNO055.Gyro.X;     /* degrees/sec, used as D term */
+
+      /* ── PID Control ────────────────────────────────── */
+      bool ok = PID_Update(&pid, pitch, pitch_rate, dt);
+
+      if (!ok) {
+        /* Robot fell past recovery angle */
+    	MotorA_Brake();
+    	MotorB_Brake();
+        printf("FALLEN — STOPPED | Pitch: %.2f\r\n", pitch);
+        continue;
+      }
+
+      if (pid.output == 0.0f) {
+        /* Within deadzone and stationary — hard brake               */
+        MotorA_Brake();
+        MotorB_Brake();
+      } else {
+        /* Drive motors using signed PID output                      */
+        PID_Drive_Motors(pid.output);
+      }
+
+      /* ── Debug print — remove when tuning is done ───────────────── */
+      printf("P:%.2f R:%.2f Out:%.0f\r\n",
+              pitch, pitch_rate, pid.output);
+      
+
+
+
 	  }
 
 	  /* ── Euler Angles (degrees) ──────────────────────────────── */
