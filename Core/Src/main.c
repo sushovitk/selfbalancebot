@@ -704,8 +704,8 @@ int main(void)
   printf("VL53L0X interrupt mode ready\r\n");
 
   PID_Init(&pid);
-  pid.setpoint        = -6.0f;       /* start at measured balance angle  */
-  pid.setpoint_target = -6.0f;       /* ramp target == setpoint   */
+  pid.setpoint        = 3.0f;       /* start at measured balance angle  */
+  pid.setpoint_target = 3.0f;       /* ramp target == setpoint   */
   pixy_balance_setpoint = pid.setpoint;
   last_pid_tick = HAL_GetTick();
 
@@ -978,7 +978,7 @@ int main(void)
 
       	  printf("--------------------------------------------------\r\n");
 		*/
-		  printf("setpoint is %.2f\n", pid.setpoint);
+		  // printf("setpoint is %.2f\n", pid.setpoint);
 
 
 	  }

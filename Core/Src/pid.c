@@ -27,10 +27,10 @@ void PID_Init(PIDController *pid)
     pid->setpoint        = 0.0f;
     pid->setpoint_target = 0.0f;
 
-    pid->Kp      = 25.5f;
-    pid->Ki      = 0.02f;
-    pid->Kd      = 1.50f;
-    pid->i_limit = 100.0f;
+    pid->Kp      = 49.0f;
+    pid->Ki      = 70.0f;
+    pid->Kd      = 2.0f;
+    pid->i_limit = 1000.0f;
 }
 
 /* ── Hard Reset (call after fall or brake) ─────────────────────────────────── */
@@ -115,6 +115,11 @@ bool PID_Update(PIDController *pid, float pitch, float pitch_rate, float dt)
     {
         PID_Reset(pid);
         return false;
+    }
+
+    if (abs_pitch < BALANCE_DEADZONE_DEG){
+    	pid->output = 0.0f;
+    	return true;
     }
 
     /* ── Dead zone brake ────────────────────────────────────────────────── */
