@@ -27,7 +27,7 @@ void PID_Init(PIDController *pid)
     pid->setpoint        = 0.0f;
     pid->setpoint_target = 0.0f;
 
-    pid->Kp      = 65.0f;
+    pid->Kp      = 36.5f;
     pid->Ki      = 0.02f;
     pid->Kd      = 0.60f;
     pid->i_limit = 100.0f;
