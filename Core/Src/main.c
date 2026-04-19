@@ -361,7 +361,7 @@ static void Pixy2_UpdateTracking(PIDController *pid, float *steer_out)
         }
         else
         {
-            pid->setpoint = pixy_balance_setpoint + DRIVE_LEAN_DEG;
+            pid->setpoint = pixy_balance_setpoint - DRIVE_LEAN_DEG;
 
             float lateral_err = (float)bx - (float)PIXY_FRAME_CX;
             *steer_out = lateral_err * STEER_GAIN;
