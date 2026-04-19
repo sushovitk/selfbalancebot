@@ -117,6 +117,7 @@ void ResetBNO055(void){
 		printf("BNO055-> Undefined chip id\n");
 		printf("Chip ID: %u\r\n", chip_id);
 		HAL_Delay(500);
+		HAL_I2C_Mem_Read(&bno_i2c, P_BNO055, CHIP_ID_ADDR, 1, &chip_id, 1, 100);
 	}
 }
 

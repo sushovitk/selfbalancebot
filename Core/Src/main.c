@@ -68,9 +68,9 @@ typedef enum {
  * ─────────────────────────────────────────────────────────────────────────*/
 #define PIXY_TRACK_SIG       1
 #define PIXY_FRAME_CX        158
-#define PIXY_STOP_WIDTH      120
+#define PIXY_STOP_WIDTH      190
 #define PIXY_MIN_WIDTH       15
-#define DRIVE_LEAN_DEG       10.5f
+#define DRIVE_LEAN_DEG       5.5f
 #define STEER_GAIN           0.3f
 #define PIXY_LOST_FRAMES     10
 #define PIXY_POLL_DIVIDER    2
@@ -237,7 +237,7 @@ static void VL53L0X_HandleThresholdEvent(void)
     vl53_last_range_mm = ranging_data.RangeMilliMeter;
 
     if ((ranging_data.RangeStatus == 0U) &&
-        (ranging_data.RangeMilliMeter <= 300U))
+        (ranging_data.RangeMilliMeter <= 250U))
     {
       vl53_stop_request = 1U;
       vl53_threshold_latched = 1U;
@@ -256,6 +256,8 @@ static void VL53L0X_HandleThresholdEvent(void)
   {
     printf("VL53L0X clear interrupt failed: %d\r\n", status);
   }
+
+  VL53L0X_ClearInterruptMask(Dev, 0);
 }
 
 // ============ MOTOR AND HBRIDGE USER CODE 0 ============
@@ -408,7 +410,7 @@ static void Pixy2_UpdateTracking(PIDController *p)
             /* Chase: lean forward by DRIVE_LEAN_DEG                      */
             PID_SetTarget(p, pixy_balance_setpoint + DRIVE_LEAN_DEG);
 
-            float lateral_err = (float)PIXY_FRAME_CX - pixy_x_filt;
+            float lateral_err = pixy_x_filt - (float)PIXY_FRAME_CX;
             steer_target = lateral_err * STEER_GAIN;
 
             /* Clamp steer to 25% of PWM_MAX */
@@ -701,8 +703,8 @@ int main(void)
   printf("VL53L0X interrupt mode ready\r\n");
 
   PID_Init(&pid);
-  pid.setpoint        = 0.0f;       /* start at measured balance angle  */
-  pid.setpoint_target = 0.0f;       /* ADDED: ramp target == setpoint   */
+  pid.setpoint        = -6.0f;       /* start at measured balance angle  */
+  pid.setpoint_target = -6.0f;       /* ramp target == setpoint   */
   pixy_balance_setpoint = pid.setpoint;
   last_pid_tick = HAL_GetTick();
 
@@ -717,174 +719,187 @@ int main(void)
   {
 	  /* ========== PS2 CONTROLLER CODE ========== */
 
-    /*PS2 code*/
-	/* ── Poll PS2 ────────────────────────────────────────────────── */
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
-    HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+		/*PS2 code*/
+		/* ── Poll PS2 ────────────────────────────────────────────────── */
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+		HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
 
-    /* ── Service VL53 IRQ ────────────────────────────────────────── */
-    if (vl53_irq_pending != 0U)
-        {
-          vl53_irq_pending = 0U;
-          VL53L0X_HandleThresholdEvent();
-        }
-
-    /* ── Handle VL53 brake request ───────────────────────────────── */
-	if (vl53_stop_request != 0U)
-	{
-	  // printf("STOP REQUEST LATCHED at %u mm\r\n", (unsigned int)vl53_last_range_mm);
-		PID_SetTarget(&pid, pixy_balance_setpoint);
-		steer_target  = 0.0f;
-		steer_output  = 0.0f;
-		pixy_lost_cnt = PIXY_LOST_FRAMES;
-		MotorA_Brake();
-		MotorB_Brake();
-		vl53_brake_active      = 1U;
-		vl53_brake_release_ms  = HAL_GetTick() + VL53_BRAKE_HOLD_MS;
-		vl53_stop_request      = 0U;
-	}
-
-	if (!imu_data_ready) {
-		continue;
-	}
-
-	imu_data_ready = false;
-
-	uint32_t now = HAL_GetTick();
-	float dt = (now - last_pid_tick) / 1000.0f;
-	last_pid_tick = now;
-	if (dt < DT_MIN_S) dt = DT_MIN_S;
-	if (dt > DT_MAX_S) dt = DT_MAX_S;
-
-	// Kick off the next DMA read. The CPU moves on instantly.
-		  // (Note: To ensure exactly 100Hz, we might move this trigger into a Hardware Timer)
-	  BNO055_status = BNO055_Read_DMA(imu_raw_data);
-
-	  if (BNO055_status == HAL_OK) {
-				 printf("DMA Request Accepted!\r\n");
-			} else if (BNO055_status == HAL_BUSY) {
-				 printf("ERROR: I2C is Busy!\r\n");
-			} else {
-				 printf("ERROR: DMA Request Failed!\r\n");
+		/* ── Service VL53 IRQ ────────────────────────────────────────── */
+		if (vl53_irq_pending != 0U)
+			{
+			  vl53_irq_pending = 0U;
+			  VL53L0X_HandleThresholdEvent();
 			}
 
-	  /* ── Determine control mode from PS2 ─────────────────────────── */
-	          ctrl_mode = (PS2_RX[1] == PS2_MODE_ANALOG) ? CTRL_MANUAL : CTRL_AUTO;
-
-	  /* ── Mode transition cleanup ──────────────────────────────────── */
-	  if (ctrl_mode != ctrl_mode_prev)
-	  {
-		  /* Clear steer so no yaw jerk on transition */
-		  steer_target = 0.0f;
-		  steer_output = 0.0f;
-		  pixy_x_filt  = (float)PIXY_FRAME_CX;
-		  pixy_lost_cnt = PIXY_LOST_FRAMES;
-
-		  /* Soft-reset integral — old setpoint history is now irrelevant */
-		  PID_SetTarget(&pid, pixy_balance_setpoint);
-
-		  printf("Mode → %s\r\n",
-				 (ctrl_mode == CTRL_MANUAL) ? "MANUAL" : "AUTO");
-		  ctrl_mode_prev = ctrl_mode;
-	  }
-
-	  /* ── Mode-specific setpoint logic ─────────────────────────────── */
-	  if (ctrl_mode == CTRL_MANUAL)
-	  {
-		  /*
-		   * Left stick Y axis (RX[7]):
-		   *   0x7B = centred (no lean)
-		   *   0x00 = full up   → lean forward  (positive)
-		   *   0xFF = full down → lean backward (negative)
-		   *
-		   * Normalise to [-1, +1] then scale by MANUAL_MAX_LEAN_DEG.
-		   * Stick axis is inverted: 0x00 = up = forward lean.
-		   */
-		  int8_t raw_y = (int8_t)((int16_t)PS2_RX[7] - 0x7B);
-		  /* raw_y: 0x00-0x7B maps to negative (up), 0x7B-0xFF maps to positive (down)
-		   * We negate so up = positive lean (forward) */
-		  float lean = -((float)raw_y / 127.0f) * MANUAL_MAX_LEAN_DEG;
-
-		  /*
-		   * Use PID_SetTarget() so:
-		   *   a) The integral soft-reset fires if the target changes a lot.
-		   *   b) The ramp smooths the stick input (prevents jerk).
-		   */
-		  PID_SetTarget(&pid, pixy_balance_setpoint + lean);
-
-		  /* No steering in manual balance mode — robot goes straight */
-		  steer_target = 0.0f;
-	  }
-	  else /* CTRL_AUTO */
-	  {
-		  /* Pixy tracking — poll every PIXY_POLL_DIV IMU cycles */
-		  if (pixy_enabled)
-		  {
-			  pixy_poll_ctr++;
-			  if (pixy_poll_ctr >= PIXY_POLL_DIVIDER)
-			  {
-				  pixy_poll_ctr = 0;
-				  Pixy2_UpdateTracking(&pid);
-			  }
-		  }
-
-		  /* Steering LP filter — smooth steer_target → steer_output */
-		  steer_output = steer_output * (1.0f - STEER_LP_ALPHA)
-					   + steer_target * STEER_LP_ALPHA;
-	  }
-
-	  /* ── Setpoint ramp (both modes) ─────────────────────────────── */
-	  PID_RampSetpoint(&pid, dt);
-
-	  /* ── IMU readings ────────────────────────────────────────────── */
-	  float pitch      =  BNO055.Euler.Z;
-	  float pitch_rate = -BNO055.Gyro.X;
-
-	  /* ── PID update ──────────────────────────────────────────────── */
-	  bool ok = PID_Update(&pid, pitch, pitch_rate, dt);
-
-	  if (!ok)
-	  {
-		  /* Robot fallen — stop everything and reset */
-		  MotorA_Brake();
-		  MotorB_Brake();
-		  PID_SetTarget(&pid, pixy_balance_setpoint);
-		  steer_target  = 0.0f;
-		  steer_output  = 0.0f;
-		  pixy_lost_cnt = PIXY_LOST_FRAMES;
-		  printf("FALLEN | Pitch: %.2f\r\n", pitch);
-		  continue;
-	  }
-
-	  if (vl53_brake_active != 0U)
-	  {
-		  if ((int32_t)(HAL_GetTick() - vl53_brake_release_ms) >= 0)
-		  {
-			  /* Hold period over — re-arm VL53 and resume */
-			  vl53_brake_active      = 0U;
-			  vl53_threshold_latched = 0U;
-			  pixy_poll_ctr          = 0;
-			  printf("VL53 brake released\r\n");
-			  /* Fall through — drive motors normally this cycle */
-		  }
-		  else
-		  {
-			  /* Still braking — hold motors and skip drive */
-			  MotorA_Brake();
-			  MotorB_Brake();
-			  continue;
-		  }
+		/* ── Handle VL53 brake request ───────────────────────────────── */
+		if (vl53_stop_request != 0U)
+		{
+		  // printf("STOP REQUEST LATCHED at %u mm\r\n", (unsigned int)vl53_last_range_mm);
+			PID_SetTarget(&pid, pixy_balance_setpoint);
+			steer_target  = 0.0f;
+			steer_output  = 0.0f;
+			pixy_lost_cnt = PIXY_LOST_FRAMES;
+			MotorA_Brake();
+			MotorB_Brake();
+			vl53_brake_active      = 1U;
+			vl53_brake_release_ms  = HAL_GetTick() + VL53_BRAKE_HOLD_MS;
+			vl53_stop_request      = 0U;
 		}
 
-	  if (pid.output == 0.0f && steer_output == 0.0f) {
-	  			/* Within deadzone and stationary — hard brake */
-	  			MotorA_Brake();
-	  			MotorB_Brake();
-	  		  } else {
-	  			/* Drive motors using signed PID output */
-	  			PID_Drive_Motors_Steered(pid.output, steer_output);
-	  }
+		if (!imu_data_ready) {
+			continue;
+		}
+
+		imu_data_ready = false;
+
+		uint32_t now = HAL_GetTick();
+		float dt = (now - last_pid_tick) / 1000.0f;
+		last_pid_tick = now;
+		if (dt < DT_MIN_S) dt = DT_MIN_S;
+		if (dt > DT_MAX_S) dt = DT_MAX_S;
+
+		// Kick off the next DMA read. The CPU moves on instantly.
+			  // (Note: To ensure exactly 100Hz, we might move this trigger into a Hardware Timer)
+		  BNO055_status = BNO055_Read_DMA(imu_raw_data);
+
+		  if (BNO055_status == HAL_OK) {
+				  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+				  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+				  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET);
+				} else if (BNO055_status == HAL_BUSY) {
+					HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
+					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);
+				} else {
+					HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
+					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+				}
+
+		  /* ── Determine control mode from PS2 ─────────────────────────── */
+		  ctrl_mode = (PS2_RX[1] == PS2_MODE_ANALOG) ? CTRL_MANUAL : CTRL_AUTO;
+
+		  /* ── Mode transition cleanup ──────────────────────────────────── */
+		  if (ctrl_mode != ctrl_mode_prev)
+		  {
+			  /* Clear steer so no yaw jerk on transition */
+			  steer_target = 0.0f;
+			  steer_output = 0.0f;
+			  pixy_x_filt  = (float)PIXY_FRAME_CX;
+			  pixy_lost_cnt = PIXY_LOST_FRAMES;
+
+			  /* Soft-reset integral — old setpoint history is now irrelevant */
+			  PID_SetTarget(&pid, pixy_balance_setpoint);
+
+			  printf("Mode → %s\r\n",
+					 (ctrl_mode == CTRL_MANUAL) ? "MANUAL" : "AUTO");
+			  ctrl_mode_prev = ctrl_mode;
+		  }
+
+		  /* ── Mode-specific setpoint logic ─────────────────────────────── */
+		  if (ctrl_mode == CTRL_MANUAL)
+		  {
+			  /*
+			   * Left stick Y axis (RX[7]):
+			   *   0x7B = centred (no lean)
+			   *   0x00 = full up   → lean forward  (positive)
+			   *   0xFF = full down → lean backward (negative)
+			   *
+			   * Normalise to [-1, +1] then scale by MANUAL_MAX_LEAN_DEG.
+			   * Stick axis is inverted: 0x00 = up = forward lean.
+			   */
+			  int8_t raw_y = (int8_t)((int16_t)PS2_RX[7] - 0x7B);
+			  /* raw_y: 0x00-0x7B maps to negative (up), 0x7B-0xFF maps to positive (down)
+			   * We negate so up = positive lean (forward) */
+			  float lean = -((float)raw_y / 127.0f) * MANUAL_MAX_LEAN_DEG;
+
+			  /*
+			   * Use PID_SetTarget() so:
+			   *   a) The integral soft-reset fires if the target changes a lot.
+			   *   b) The ramp smooths the stick input (prevents jerk).
+			   */
+			  PID_SetTarget(&pid, pixy_balance_setpoint + lean);
+
+			  /* No steering in manual balance mode — robot goes straight */
+			  steer_target = 0.0f;
+		  }
+		  else /* CTRL_AUTO */
+		  {
+			  /* Pixy tracking — poll every PIXY_POLL_DIV IMU cycles */
+			  if (pixy_enabled)
+			  {
+				  pixy_poll_ctr++;
+				  if (pixy_poll_ctr >= PIXY_POLL_DIVIDER)
+				  {
+					  pixy_poll_ctr = 0;
+					  Pixy2_UpdateTracking(&pid);
+				  }
+			  }
+
+			  /* Steering LP filter — smooth steer_target → steer_output */
+			  steer_output = steer_output * (1.0f - STEER_LP_ALPHA)
+						   + steer_target * STEER_LP_ALPHA;
+		  }
+
+		  /* ── Setpoint ramp (both modes) ─────────────────────────────── */
+		  PID_RampSetpoint(&pid, dt);
+
+		  /* ── IMU readings ────────────────────────────────────────────── */
+		  float pitch      =  BNO055.Euler.Z;
+		  float pitch_rate = -BNO055.Gyro.X;
+
+		  // discard false data
+		  if (pitch < -180.0f || pitch > 180.0f)
+		  {
+			  continue;
+		  }
+
+		  /* ── PID update ──────────────────────────────────────────────── */
+		  bool ok = PID_Update(&pid, pitch, pitch_rate, dt);
+
+		  if (!ok)
+		  {
+			  /* Robot fallen — stop everything and reset */
+			  MotorA_Brake();
+			  MotorB_Brake();
+			  PID_SetTarget(&pid, pixy_balance_setpoint);
+			  steer_target  = 0.0f;
+			  steer_output  = 0.0f;
+			  pixy_lost_cnt = PIXY_LOST_FRAMES;
+			  printf("FALLEN | Pitch: %.2f\r\n", pitch);
+			  continue;
+		  }
+
+		  if (vl53_brake_active != 0U)
+		  {
+			  if ((int32_t)(HAL_GetTick() - vl53_brake_release_ms) >= 0)
+			  {
+				  /* Hold period over — re-arm VL53 and resume */
+				  VL53L0X_ClearInterruptMask(Dev, 0);
+				  vl53_brake_active      = 0U;
+				  vl53_threshold_latched = 0U;
+				  pixy_poll_ctr          = 0;
+				  printf("VL53 brake released\r\n");
+				  /* Fall through — drive motors normally this cycle */
+			  }
+			  else
+			  {
+				  /* Still braking — hold motors and skip drive */
+				  MotorA_Brake();
+				  MotorB_Brake();
+				  continue;
+			  }
+			}
+
+		  if (pid.output == 0.0f && steer_output == 0.0f) {
+					/* Within deadzone and stationary — hard brake */
+					MotorA_Brake();
+					MotorB_Brake();
+				  } else {
+					/* Drive motors using signed PID output */
+					PID_Drive_Motors_Steered(pid.output, steer_output);
+				  }
 
 
 
@@ -902,27 +917,30 @@ int main(void)
 
 
       /* ── Debug print — remove when tuning is done ───────────────── */
-      printf("P:%.2f R:%.2f SP:%.2f Out:%.0f Steer:%.0f\r\n",
-              pitch, pitch_rate, pid.setpoint, pid.output, steer_output);
+      //printf("P:%.2f R:%.2f SP:%.2f Out:%.0f Steer:%.0f\r\n",
+              //pitch, pitch_rate, pid.setpoint, pid.output, steer_output);
+
+      /* ── Euler Angles (degrees) ──────────────────────────────── */
+      /*
+      	  // Euler.Y = Pitch → this is your main balancing angle
+      	  printf("--- BNO055 Data ---\r\n");
+      	  printf("Euler -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
+      	               BNO055.Euler.X, BNO055.Euler.Y, BNO055.Euler.Z);
+
+      	  // ── Gyroscope (degrees/sec) ─────────────────────────────── //
+      	  printf("Accel -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
+      	               BNO055.Accel.X, BNO055.Accel.Y, BNO055.Accel.Z);
+
+      	  // ── Accelerometer (m/s²) ────────────────────────────────── //
+      	  printf("Gyro  -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
+      	               BNO055.Gyro.X, BNO055.Gyro.Y, BNO055.Gyro.Z);
+
+      	  printf("--------------------------------------------------\r\n");
+      	*/
+
+
 	  }
 
-	  /* ── Euler Angles (degrees) ──────────────────────────────── */
-	  /*
-	  // Euler.Y = Pitch → this is your main balancing angle
-	  printf("--- BNO055 Data ---\r\n");
-	  printf("Euler -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
-	               BNO055.Euler.X, BNO055.Euler.Y, BNO055.Euler.Z);
-
-	  // ── Gyroscope (degrees/sec) ─────────────────────────────── //
-	  printf("Accel -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
-	               BNO055.Accel.X, BNO055.Accel.Y, BNO055.Accel.Z);
-
-	  // ── Accelerometer (m/s²) ────────────────────────────────── //
-	  printf("Gyro  -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
-	               BNO055.Gyro.X, BNO055.Gyro.Y, BNO055.Gyro.Z);
-
-	  printf("--------------------------------------------------\r\n");
-	  */
 
 	// Add a 100ms delay so your terminal doesn't crash from reading too fast
 	//HAL_Delay(500);
@@ -959,7 +977,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 16;
+  RCC_OscInitStruct.PLL.PLLN = 32;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
@@ -973,11 +991,11 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV8;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV16;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV8;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
   }
@@ -1047,7 +1065,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x00100D14;
+  hi2c2.Init.Timing = 0x10B17DB5;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -1150,7 +1168,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -1311,6 +1329,9 @@ static void MX_GPIO_Init(void)
                           |MOTOR_B_IN2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : PE2 PE3 */
@@ -1373,7 +1394,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : VL53_INT_Pin */
   GPIO_InitStruct.Pin = VL53_INT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(VL53_INT_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PE7 PE8 PE9 PE10
@@ -1445,10 +1466,9 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : PC7 */
   GPIO_InitStruct.Pin = GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PC8 PC9 PC11 PC12 */
@@ -1579,12 +1599,12 @@ void Error_Handler(void)
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)
-  {
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
-		HAL_Delay(100);
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
-		HAL_Delay(100);
-  }
+	{
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+	  for (volatile uint32_t i = 0; i < 1000000; i++); // Software delay
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+	  for (volatile uint32_t i = 0; i < 1000000; i++); // Software delay
+	}
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
