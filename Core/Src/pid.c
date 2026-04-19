@@ -27,7 +27,7 @@ void PID_Init(PIDController *pid)
     pid->setpoint        = 0.0f;
     pid->setpoint_target = 0.0f;
 
-    pid->Kp      = 20.5f;
+    pid->Kp      = 25.5f;
     pid->Ki      = 0.02f;
     pid->Kd      = 1.50f;
     pid->i_limit = 100.0f;
@@ -107,8 +107,6 @@ bool PID_Update(PIDController *pid, float pitch, float pitch_rate, float dt)
      * dt is clamped by the caller (main.c) to [DT_MIN_S, DT_MAX_S].
      * The guard below is a last-resort safety net only.
      */
-    if (dt < DT_MIN_S) dt = DT_MIN_S;
-    if (dt > DT_MAX_S) dt = DT_MAX_S;
 
     float abs_pitch = fabsf(pitch - pid->setpoint);
 

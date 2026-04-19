@@ -125,6 +125,7 @@ uint8_t      OffsetDatas[22];
 BNO055_Sensors_t BNO055;
 uint8_t      imu_raw_data[24];			// DMA dumps the 24 bytes here
 volatile bool imu_data_ready = false;	// Flag to tell the main loop data is fresh
+volatile bool imu_i2c_error = false;
 
 /* ── Pixy2 ──────────────────────────────────────────────────────────────── */
 Pixy2 pixy;
@@ -725,6 +726,8 @@ int main(void)
 		HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
 		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
 
+		//printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x\n", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
+
 		/* ── Service VL53 IRQ ────────────────────────────────────────── */
 		if (vl53_irq_pending != 0U)
 			{
@@ -747,9 +750,48 @@ int main(void)
 			vl53_stop_request      = 0U;
 		}
 
+		static uint32_t last_imu_tick = 0;
+
+		if (imu_i2c_error) {
+		    imu_i2c_error = false;
+		    MotorA_Brake();
+		    MotorB_Brake();
+		    printf("I2C error — recovering\r\n");
+
+		    HAL_I2C_DeInit(&bno_i2c);
+		    HAL_Delay(10);
+		    HAL_I2C_Init(&bno_i2c);
+		    HAL_Delay(5);
+		    BNO055_Read_DMA(imu_raw_data);
+		}
+
 		if (!imu_data_ready) {
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+
+			if (HAL_GetTick() - last_imu_tick > 50) {  // 50ms timeout
+				// IMU has gone silent — safe stop
+				MotorA_Brake();
+				MotorB_Brake();
+				printf("IMU timeout — recovering\r\n");
+
+				// Reset I2C and re-arm DMA
+				ResetBNO055();
+				HAL_I2C_DeInit(&bno_i2c);
+				HAL_Delay(10);
+				HAL_I2C_Init(&bno_i2c);
+				HAL_Delay(5);
+				BNO055_Read_DMA(imu_raw_data);
+				last_imu_tick = HAL_GetTick();
+			 }
 			continue;
 		}
+
+		last_imu_tick = HAL_GetTick();
+
+		// process data here
+		BNO055_DMA_store(&BNO055);
 
 		imu_data_ready = false;
 
@@ -767,15 +809,14 @@ int main(void)
 				  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
 				  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
 				  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET);
-				} else if (BNO055_status == HAL_BUSY) {
-					HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
-					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
-					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);
-				} else {
-					HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
-					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
-					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
-				}
+		  } else {
+			  // I2C is stuck — reset and recover
+			      HAL_I2C_DeInit(&bno_i2c);
+			      HAL_Delay(10);
+			      HAL_I2C_Init(&bno_i2c);
+			      HAL_Delay(10);
+			      BNO055_Read_DMA(imu_raw_data);
+		  }
 
 		  /* ── Determine control mode from PS2 ─────────────────────────── */
 		  ctrl_mode = (PS2_RX[1] == PS2_MODE_ANALOG) ? CTRL_MANUAL : CTRL_AUTO;
@@ -904,7 +945,7 @@ int main(void)
 
 
 
-    // printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
+    // printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x\n", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
 
     // convert to position data
     // Y DATA GIVES POWER (Forward if > 0x7b, backwards if 0x7b > )
@@ -921,7 +962,7 @@ int main(void)
               //pitch, pitch_rate, pid.setpoint, pid.output, steer_output);
 
       /* ── Euler Angles (degrees) ──────────────────────────────── */
-      /*
+		  /*
       	  // Euler.Y = Pitch → this is your main balancing angle
       	  printf("--- BNO055 Data ---\r\n");
       	  printf("Euler -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
@@ -936,7 +977,8 @@ int main(void)
       	               BNO055.Gyro.X, BNO055.Gyro.Y, BNO055.Gyro.Z);
 
       	  printf("--------------------------------------------------\r\n");
-      	*/
+		*/
+		  printf("setpoint is %.2f\n", pid.setpoint);
 
 
 	  }
@@ -1571,9 +1613,6 @@ PUTCHAR_PROTOTYPE
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c) {
     if (hi2c->Instance == I2C2) {
 
-    	// call store function to store the information
-    	BNO055_DMA_store(&BNO055);
-
         // Flag the main loop that ALL data is fresh!
         imu_data_ready = true;
     }
@@ -1585,6 +1624,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   {
     vl53_irq_pending = 1U;
   }
+}
+
+void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c) {
+    if (hi2c->Instance == I2C2) {
+        imu_i2c_error = true;  // signal main loop, do nothing else
+    }
 }
 
 /* USER CODE END 4 */
