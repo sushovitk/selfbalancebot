@@ -857,7 +857,9 @@ int main(void)
 			  // int8_t raw_y = (int8_t)((int16_t)PS2_RX[8] - 0x7B);
 			  /* raw_y: 0x00-0x7B maps to negative (up), 0x7B-0xFF maps to positive (down)
 			   * We negate so up = positive lean (forward) */
-			  float lean = -((float)(PS2_RX[8] - 0x7B) / 127.0f) * MANUAL_MAX_LEAN_DEG;
+			  float lean = ((float)(PS2_RX[8] - 0x7B) / 127.0f) * MANUAL_MAX_LEAN_DEG;
+
+			  float steer_output = -((float)(PS2_RX[7] - 0x7B) / 127.0f) * STEER_GAIN;
 
 			  /*
 			   * Use PID_SetTarget() so:

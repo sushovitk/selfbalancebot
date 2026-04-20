@@ -27,13 +27,13 @@
  * If the robot tilts past this angle it cannot self-recover.
  * Motors stop and integral resets to prevent windup on restart.
  * -------------------------------------------------------------------------- */
-#define BALANCE_CUTOFF_DEG   45.0f  // stop trying to balance past 45°
+#define BALANCE_CUTOFF_DEG   65.0f  // stop trying to balance past 45°
 
 /* ── Dead zone ───────────────────────────────────────────────────────────────
  * If pitch is within this band, brake instead of running motors.
  * Prevents buzzing/jitter when nearly balanced.
  * -------------------------------------------------------------------------- */
-#define BALANCE_DEADZONE_DEG  2.50f  // ± degrees around setpoint = brake
+#define BALANCE_DEADZONE_DEG  2.30f  // ± degrees around setpoint = brake
 
 /* ── Setpoint ramp rate ──────────────────────────────────────────────────────
  * Maximum degrees-per-second at which pid.setpoint is allowed to move

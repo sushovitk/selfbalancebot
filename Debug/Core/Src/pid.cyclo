@@ -1,3 +1,6 @@
-../Core/Src/pid.c:11:6:PID_Init	1
-../Core/Src/pid.c:26:6:PID_Reset	1
-../Core/Src/pid.c:34:6:PID_Update	7
+../Core/Src/pid.c:22:6:PID_Init	1
+../Core/Src/pid.c:37:6:PID_Reset	1
+../Core/Src/pid.c:52:6:PID_SoftReset	1
+../Core/Src/pid.c:64:6:PID_SetTarget	2
+../Core/Src/pid.c:90:6:PID_RampSetpoint	3
+../Core/Src/pid.c:104:6:PID_Update	5

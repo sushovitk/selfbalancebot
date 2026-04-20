@@ -11,3 +11,4 @@
 ../Core/Src/stm32l4xx_it.c:221:6:DMA1_Channel2_IRQHandler	8	static
 ../Core/Src/stm32l4xx_it.c:235:6:I2C1_EV_IRQHandler	8	static
 ../Core/Src/stm32l4xx_it.c:249:6:I2C2_EV_IRQHandler	8	static
+../Core/Src/stm32l4xx_it.c:263:6:EXTI15_10_IRQHandler	8	static
