@@ -70,7 +70,7 @@ typedef enum {
 #define PIXY_FRAME_CX        158
 #define PIXY_STOP_WIDTH      190
 #define PIXY_MIN_WIDTH       15
-#define DRIVE_LEAN_DEG       5.5f
+#define DRIVE_LEAN_DEG       1.7f
 #define STEER_GAIN           0.3f
 #define PIXY_LOST_FRAMES     10
 #define PIXY_POLL_DIVIDER    2
@@ -86,7 +86,7 @@ typedef enum {
  *                       is pushed all the way forward/backward (±127 counts).
  *                       Increase to drive faster; decrease for more caution.
  * ─────────────────────────────────────────────────────────────────────────*/
-#define MANUAL_MAX_LEAN_DEG   5.0f
+#define MANUAL_MAX_LEAN_DEG   1.7f
 
 #define PS2_MODE_ANALOG   0x73
 #define PS2_MODE_DIGITAL  0x41
@@ -238,7 +238,7 @@ static void VL53L0X_HandleThresholdEvent(void)
     vl53_last_range_mm = ranging_data.RangeMilliMeter;
 
     if ((ranging_data.RangeStatus == 0U) &&
-        (ranging_data.RangeMilliMeter <= 250U))
+        (ranging_data.RangeMilliMeter <= 50U)) // 250 original
     {
       vl53_stop_request = 1U;
       vl53_threshold_latched = 1U;
@@ -353,8 +353,8 @@ static void PID_Drive_Motors_Steered(float output, float steer)
     if      (output >  PWM_MAX) output =  PWM_MAX;
     else if (output < -PWM_MAX) output = -PWM_MAX;
 
-    float outA = output + steer;
-    float outB = output - steer;
+    float outA = output - steer;
+    float outB = output + steer;
 
     if (outA >  PWM_MAX) outA =  PWM_MAX;
     if (outA < -PWM_MAX) outA = -PWM_MAX;
@@ -704,8 +704,8 @@ int main(void)
   printf("VL53L0X interrupt mode ready\r\n");
 
   PID_Init(&pid);
-  pid.setpoint        = 3.0f;       /* start at measured balance angle  */
-  pid.setpoint_target = 3.0f;       /* ramp target == setpoint   */
+  pid.setpoint        = 0.0f;  // 3.0f   /* start at measured balance angle  */
+  pid.setpoint_target = 0.0f;  // 3.0f   /* ramp target == setpoint   */
   pixy_balance_setpoint = pid.setpoint;
   last_pid_tick = HAL_GetTick();
 
@@ -718,15 +718,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  /* ========== PS2 CONTROLLER CODE ========== */
-
-		/*PS2 code*/
-		/* ── Poll PS2 ────────────────────────────────────────────────── */
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
-		HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
-
-		//printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x\n", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
 
 		/* ── Service VL53 IRQ ────────────────────────────────────────── */
 		if (vl53_irq_pending != 0U)
@@ -818,6 +809,17 @@ int main(void)
 			      BNO055_Read_DMA(imu_raw_data);
 		  }
 
+		  /* ========== PS2 CONTROLLER CODE ========== */
+
+		  		/*PS2 code*/
+		  		/* ── Poll PS2 ────────────────────────────────────────────────── */
+		  		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+		  		HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
+		  		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+
+		  		printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x\n", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
+
+
 		  /* ── Determine control mode from PS2 ─────────────────────────── */
 		  ctrl_mode = (PS2_RX[1] == PS2_MODE_ANALOG) ? CTRL_MANUAL : CTRL_AUTO;
 
@@ -850,10 +852,12 @@ int main(void)
 			   * Normalise to [-1, +1] then scale by MANUAL_MAX_LEAN_DEG.
 			   * Stick axis is inverted: 0x00 = up = forward lean.
 			   */
-			  int8_t raw_y = (int8_t)((int16_t)PS2_RX[7] - 0x7B);
+
+			  // printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x\n", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
+			  // int8_t raw_y = (int8_t)((int16_t)PS2_RX[8] - 0x7B);
 			  /* raw_y: 0x00-0x7B maps to negative (up), 0x7B-0xFF maps to positive (down)
 			   * We negate so up = positive lean (forward) */
-			  float lean = -((float)raw_y / 127.0f) * MANUAL_MAX_LEAN_DEG;
+			  float lean = -((float)(PS2_RX[8] - 0x7B) / 127.0f) * MANUAL_MAX_LEAN_DEG;
 
 			  /*
 			   * Use PID_SetTarget() so:
@@ -978,7 +982,7 @@ int main(void)
 
       	  printf("--------------------------------------------------\r\n");
 		*/
-		  // printf("setpoint is %.2f\n", pid.setpoint);
+		  printf("setpoint is %.2f\n", pid.setpoint);
 
 
 	  }
@@ -1034,7 +1038,7 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV16;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV8;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV8;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
@@ -1059,7 +1063,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x00100D14;
+  hi2c1.Init.Timing = 0x00201D2B;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;

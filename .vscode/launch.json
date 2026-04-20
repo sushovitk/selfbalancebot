@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/robertconforti/eecs/eecs373/selfbalancebot/Core/Src",
+      "program": "/Users/robertconforti/eecs/eecs373/selfbalancebot/Core/Src/build/Debug/outDebug"
+    }
+  ]
+}
