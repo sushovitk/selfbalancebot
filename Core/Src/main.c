@@ -47,33 +47,15 @@ typedef enum {
 /* USER CODE BEGIN PD */
 #define VL53L0X_ADDR 0x52
 
-/* ── Pixy2 tracking configuration ─────────────────────────────────────────
- * PIXY_TRACK_SIG     : Pixy2 signature to chase (1–7, trained in PixyMon).
- * PIXY_FRAME_CX      : Horizontal centre of the Pixy2 frame (316 px wide).
- * PIXY_STOP_WIDTH    : Block pixel-width at which we consider the object
- *                      "close enough" and stop driving toward it.
- *                      Tune by placing the robot at your desired stop
- *                      distance and reading pixy.blocks[0].width.
- * PIXY_MIN_WIDTH     : Ignore detections narrower than this — too noisy.
- * DRIVE_LEAN_DEG     : Setpoint offset (degrees) applied while chasing.
- *                      Positive = lean forward → PID drives the robot forward.
- *                      Tune together with Kp: too large → overshoot.
- * STEER_GAIN         : Converts lateral pixel error to differential PWM.
- *                      (lateral_err_px) * STEER_GAIN = steer_pwm_delta.
- *                      Start small (~0.3) and increase until turns are crisp.
- * PIXY_LOST_FRAMES   : Consecutive empty frames before tracking is cancelled
- *                      and the setpoint returns to the balance setpoint.
- * PIXY_POLL_DIVIDER  : Poll Pixy2 every Nth PID cycle to avoid SPI overhead
- *                      on every IMU callback. 2 → ~50 Hz at 100 Hz PID rate.
- * ─────────────────────────────────────────────────────────────────────────*/
-#define PIXY_TRACK_SIG       1
-#define PIXY_FRAME_CX        158
-#define PIXY_STOP_WIDTH      190
-#define PIXY_MIN_WIDTH       15
-#define DRIVE_LEAN_DEG       1.7f
-#define STEER_GAIN           0.3f
-#define PIXY_LOST_FRAMES     10
-#define PIXY_POLL_DIVIDER    2
+/* Pixy2 tracking */
+#define PIXY_TRACK_SIG       1       /* signature trained in PixyMon          */
+#define PIXY_FRAME_CX        158     /* frame half-width (316 px wide)        */
+#define PIXY_STOP_WIDTH      190     /* block width at desired stop distance  */
+#define PIXY_MIN_WIDTH       15      /* ignore detections narrower than this  */
+#define DRIVE_LEAN_DEG       1.7f    /* forward lean setpoint while chasing   */
+#define STEER_GAIN           0.3f    /* px error → PWM differential           */
+#define PIXY_LOST_FRAMES     10      /* misses before tracking is cancelled   */
+#define PIXY_POLL_DIVIDER    2       /* poll every Nth PID cycle              */
 
 #define VL53_BRAKE_HOLD_MS   1000U
 /* USER CODE END PD */
@@ -81,12 +63,7 @@ typedef enum {
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
-/* ── Manual drive configuration ────────────────────────────────────────────
- * MANUAL_MAX_LEAN_DEG : Maximum setpoint offset from balance when the stick
- *                       is pushed all the way forward/backward (±127 counts).
- *                       Increase to drive faster; decrease for more caution.
- * ─────────────────────────────────────────────────────────────────────────*/
-#define MANUAL_MAX_LEAN_DEG   1.7f
+#define MANUAL_MAX_LEAN_DEG   1.7f   /* max setpoint offset at full stick     */
 
 #define PS2_MODE_ANALOG   0x73
 #define PS2_MODE_DIGITAL  0x41
@@ -110,7 +87,7 @@ TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
 
-/* ── VL53L0X state ─────────────────────────────────────────────────────── */
+/* VL53L0X */
 VL53L0X_Dev_t    vl53_dev;
 VL53L0X_DEV      Dev                  = &vl53_dev;
 volatile uint8_t vl53_irq_pending     = 0;
@@ -120,14 +97,14 @@ uint16_t         vl53_last_range_mm   = 0;
 static uint8_t   vl53_brake_active    = 0;
 static uint32_t  vl53_brake_release_ms = 0;
 
-/* ── IMU ────────────────────────────────────────────────────────────────── */
+/* IMU */
 uint8_t      OffsetDatas[22];
 BNO055_Sensors_t BNO055;
-uint8_t      imu_raw_data[24];			// DMA dumps the 24 bytes here
-volatile bool imu_data_ready = false;	// Flag to tell the main loop data is fresh
+uint8_t      imu_raw_data[24];
+volatile bool imu_data_ready = false;
 volatile bool imu_i2c_error = false;
 
-/* ── Pixy2 ──────────────────────────────────────────────────────────────── */
+/* Pixy2 */
 Pixy2 pixy;
 
 #define PIXY2_SEND_SYNC_BYTE  0xae
@@ -135,33 +112,28 @@ Pixy2 pixy;
 #define PIXY2_RECV_SYNC_BYTE  0xaf
 #define PIXY2_RECV_SYNC_BYTE2 0xc1
 
-/* ── PID ────────────────────────────────────────────────────────────────── */
+/* PID */
 PIDController pid;
 uint32_t      last_pid_tick = 0;
 
-/* ── Pixy2 tracking state ──────────────────────────────────────────────── */
-/* steer_output         : signed differential PWM applied between motors.
- * pixy_lost_cnt        : consecutive tracking misses before chase cancels.
- * pixy_poll_ctr        : PID-cycle divider for Pixy polling.
- * pixy_enabled         : true after successful Pixy2 init.
- * pixy_balance_setpoint: tuned balance setpoint to restore when stopping. */
-static float    steer_output          = 0.0f;   /* smoothed, drives motors  */
-static float    steer_target          = 0.0f;   /* raw target from Pixy     */
-static float    pixy_x_filt           = (float)PIXY_FRAME_CX; /* filtered x */
+/* Pixy2 tracking state */
+static float    steer_output          = 0.0f;
+static float    steer_target          = 0.0f;
+static float    pixy_x_filt           = (float)PIXY_FRAME_CX;
 static uint8_t  pixy_lost_cnt         = 0;
 static uint8_t  pixy_poll_ctr         = 0;
 static bool     pixy_enabled          = false;
 static float    pixy_balance_setpoint = 0.0f;
-static uint32_t pixy_debug_ms         = 0;      /* timestamp of last print  */
+static uint32_t pixy_debug_ms         = 0;
 
-/* ── Control state ──────────────────────────────────────────────────────── */
+/* Control state */
 static CtrlMode_t ctrl_mode     = CTRL_AUTO;
-static CtrlMode_t ctrl_mode_prev = CTRL_AUTO; /* detect mode transitions */
+static CtrlMode_t ctrl_mode_prev = CTRL_AUTO;
 
-/* ── Debug ──────────────────────────────────────────────────────────────── */
+/* Debug */
 static uint32_t debug_last_ms = 0;
 
-/* ── PS2 ────────────────────────────────────────────────────────────────── */
+/* PS2 */
 uint8_t PS2_RX[9];
 uint8_t PS2_TX[9] = {0x01, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
@@ -335,18 +307,9 @@ static inline void Pixy2_CS_Deselect(void) {
 
 /**
  * @brief  Apply PID output + lateral steering differential to both motors.
- *
- * @param  output  Signed PID output. Positive = forward, negative = backward.
- *                 Magnitude maps to PWM duty (0–PWM_MAX).
- * @param  steer   Signed steering bias (PWM counts). Applied as +steer to
- *                 Motor A and -steer to Motor B for differential turning.
- *                 Motor A is the LEFT motor — if the object is to the right
- *                 (positive lateral error) a positive steer speeds up the
- *                 left motor and slows the right, turning right.
- *
- * The deadband snap is applied after mixing so both motors honour the
- * hardware minimum. If a mixed value lands below the deadband but above
- * zero, it is clamped up to PWM_MIN_DEADBAND so the motor actually turns.
+ * @param  output  Signed PID output; positive = forward, magnitude = PWM duty.
+ * @param  steer   Signed steering bias. +steer speeds up Motor A (left),
+ *                 slows Motor B (right), turning the robot right.
  */
 static void PID_Drive_Motors_Steered(float output, float steer)
 {
@@ -377,10 +340,7 @@ static void PID_Drive_Motors_Steered(float output, float steer)
 
 /**
  * @brief  Poll the Pixy2 and update the PID setpoint + steering bias.
- *
- * Called every PIXY_POLL_DIVIDER PID cycles from inside the main loop.
- * Uses the current balance setpoint as the baseline so the existing
- * tuning remains unchanged when no target is being chased.
+ *         Called every PIXY_POLL_DIVIDER PID cycles.
  */
 static void Pixy2_UpdateTracking(PIDController *p)
 {
@@ -395,33 +355,27 @@ static void Pixy2_UpdateTracking(PIDController *p)
         uint16_t bw = pixy.blocks[0].width;
         uint16_t bx = pixy.blocks[0].x;
 
-        /* ── Low-pass filter the x position ──────────────────────────────
-         * Alpha 0.4 gives a ~2.5-cycle time constant at 50 Hz Pixy rate.
-         * Increase toward 1.0 for faster (noisier) response.            */
+        /* LP filter x position — alpha 0.4, ~2.5 cycle time constant at 50 Hz */
         pixy_x_filt = pixy_x_filt * 0.6f + (float)bx * 0.4f;
 
         if (bw >= PIXY_STOP_WIDTH)
         {
-            /* Close enough — hold balance, cancel steer */
             PID_SetTarget(p, pixy_balance_setpoint);
             steer_target = 0.0f;
         }
         else
         {
-            /* Chase: lean forward by DRIVE_LEAN_DEG                      */
             PID_SetTarget(p, pixy_balance_setpoint + DRIVE_LEAN_DEG);
 
             float lateral_err = pixy_x_filt - (float)PIXY_FRAME_CX;
             steer_target = lateral_err * STEER_GAIN;
 
-            /* Clamp steer to 25% of PWM_MAX */
             if (steer_target >  (PWM_MAX * 0.25f)) steer_target =  (PWM_MAX * 0.25f);
             if (steer_target < -(PWM_MAX * 0.25f)) steer_target = -(PWM_MAX * 0.25f);
         }
     }
     else
     {
-        /* No detection — count toward PIXY_LOST_FRAMES then cancel chase */
         if (pixy_lost_cnt < PIXY_LOST_FRAMES)
         {
             pixy_lost_cnt++;
@@ -436,28 +390,23 @@ static void Pixy2_UpdateTracking(PIDController *p)
 
 void PID_Drive_Motors(float output)
 {
-    /* Hard clamp to PWM_MAX defined in pid.h (800) */
     if      (output >  PWM_MAX) output =  PWM_MAX;
     else if (output < -PWM_MAX) output = -PWM_MAX;
  
-    /* Below deadband motors don't actually spin — skip to avoid buzzing */
     if (output > 0.0f && output <  PWM_MIN_DEADBAND) output =  PWM_MIN_DEADBAND;
     if (output < 0.0f && output > -PWM_MIN_DEADBAND) output = -PWM_MIN_DEADBAND;
  
     uint16_t duty = (uint16_t)fabsf(output);
  
     if (output > 0.0f) {
-        /* Drive FORWARD — both motors forward */
         MotorA_Set(duty, 1);
         MotorB_Set(duty, 1);
     }
     else if (output < 0.0f) {
-        /* Drive BACKWARD — both motors reverse */
         MotorA_Set(duty, 0);
         MotorB_Set(duty, 0);
     }
     else {
-        /* Hard brake — robot is in deadzone */
         MotorA_Brake();
         MotorB_Brake();
     }
@@ -467,78 +416,49 @@ void Sensor_Init(void)
 {
 	BNO_Status_t Status = {0};
 
-	//Init structure definition section
 	BNO055_Init_t BNO055_InitStruct = {0};
 
-	//Reset section
 	ResetBNO055();
 	HAL_Delay(800);
 	/*============================ *BNO055 Initialization* ============================*/
 
-	BNO055_InitStruct.ACC_Range = Range_4G;			//Range_X
-	BNO055_InitStruct.Axis = DEFAULT_AXIS_REMAP;			//value will be entered by looking at the data sheet
-	BNO055_InitStruct.Axis_sign = DEFAULT_AXIS_SIGN;		//value will be entered by looking at the data sheet
-	BNO055_InitStruct.Clock_Source = CLOCK_EXTERNAL;		//CLOCK_EXTERNAL or CLOCK_INTERNAL
-	BNO055_InitStruct.Mode = BNO055_NORMAL_MODE;			//BNO055_X_MODE   X:NORMAL, LOWPOWER, SUSPEND
+	BNO055_InitStruct.ACC_Range = Range_4G;
+	BNO055_InitStruct.Axis = DEFAULT_AXIS_REMAP;
+	BNO055_InitStruct.Axis_sign = DEFAULT_AXIS_SIGN;
+	BNO055_InitStruct.Clock_Source = CLOCK_EXTERNAL;
+	BNO055_InitStruct.Mode = BNO055_NORMAL_MODE;
 	BNO055_InitStruct.OP_Modes = IMU;
 	BNO055_InitStruct.Unit_Sel = (UNIT_ORI_ANDROID | UNIT_TEMP_CELCIUS | UNIT_EUL_DEG | UNIT_GYRO_DPS | UNIT_ACC_MS2);
-									//(UNIT_ORI_X | UNIT_TEMP_X | UNIT_EUL_X | UNIT_GYRO_X | UNIT_ACC_X)
 	BNO055_Init(BNO055_InitStruct);
 
-	//------------------BNO055 Calibration------------------
-
-	/*This function allows the sensor offset data obtained after BNO055 is calibrated once to be written
-	 *to the registers. In this way, there is no need to calibrate the sensor every time it is powered on.
-	 */
-	//setSensorOffsets(OffsetDatas);
-
-	/*-=-=-=-=-=-=Calibration Part-=-=-=-=-=-=*/
 	uint8_t calibBuf[CALIB_DATA_SIZE];
 	bool needs_calibration = false;
 
-	/*
-	if(Calibrate_BNO055())
-	{
-		getSensorOffsets(OffsetDatas);
-	}
-	else
-	{
-		printf("Sensor calibration failed.\nFailed to retrieve offset data\n");
-	}*/
-
-	// hold user button at boot to force recalibration
+	/* Hold user button at boot to force recalibration */
 	if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_SET) {
 		printf("User button held — forcing recalibration.\r\n");
 		Calib_Flash_Erase();
 		needs_calibration = true;
 
 	} else if (Calib_Flash_Load(calibBuf)) {
-		// Restore saved offsets to BNO055
-
 		setSensorOffsets(calibBuf);
 		printf("Calibration restored from flash — skipping recalibration.\r\n");
 
 	} else {
-
-		// Flash load failed or was empty
 		needs_calibration = true;
 	}
 
 	if (needs_calibration) {
-
-		// No saved data — run full calibration
 		if(Calibrate_BNO055())
 			{
-				getSensorOffsets(OffsetDatas);	// read offsets from BNO055
-				Calib_Flash_Save(OffsetDatas);     // save to flash for next boot
+				getSensorOffsets(OffsetDatas);
+				Calib_Flash_Save(OffsetDatas);
 			}
 			else
 			{
 				printf("Sensor calibration failed.\nFailed to retrieve offset data\n");
 			}
-
 	}
-
 
 	Check_Status(&Status);
 	printf("Selftest Result: %d\t",Status.STresult);
@@ -548,14 +468,11 @@ void Sensor_Init(void)
 }
 
 void BNO055_setup() {
-	// initialize the sensor
 	Sensor_Init();
 
-	// Fetch the current calibration levels
 	Calib_status_t current_calib = {0};
 	getCalibration(&current_calib);
 
-	// Print them out to see if the flash memory injection worked
 	printf("Boot Calibration Level -> System: %d | Gyro: %d | Accel: %d\r\n",
 	       current_calib.System, current_calib.Gyro, current_calib.Acc);
 
@@ -609,28 +526,23 @@ int main(void)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);  /* Motor A */
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);  /* Motor B */
 
-  // initialize controller
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
 
-  // Ensure all LEDs start off 
-	// LD2 blue = PB7, LD3 red = PB14
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+  /* LD2 blue = PB7, LD3 red = PB14 */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
 
-  // initialize the sensor
   BNO055_setup();
 
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);   /* Motor A enable */
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);   /* Motor B enable */
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
  
-  /* Start with both motors braked */
   MotorA_Brake();
   MotorB_Brake();
 
-  /*pixy init*/
-  // 3 slow blinks on LD2 (blue) = board alive, about to attempt Pixy2 init
+  /* 3 slow blinks on LD2 = board alive, about to init Pixy2 */
 	for (int i = 0; i < 3; i++) {
 		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
 		HAL_Delay(500);
@@ -640,7 +552,7 @@ int main(void)
 
 	if (Pixy2_Init(&pixy, &hspi1, GPIOD, GPIO_PIN_14) == HAL_OK) {
 		pixy_enabled = true;
-		// 2 fast blinks on LD2 (blue) = Pixy2 init succeeded
+		/* 2 fast blinks = init OK */
 		for (int i = 0; i < 2; i++) {
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
 			HAL_Delay(150);
@@ -657,10 +569,8 @@ int main(void)
 		printf("Pixy2 init FAILED — running balance-only mode\r\n");
 	}
 
-    // Sensor boot up
   HAL_Delay(10);
 
-  /*VL53l0x*/
   memset(&vl53_dev, 0, sizeof(vl53_dev));
   Dev->I2cDevAddr = VL53L0X_ADDR;
   Dev->comms_type = 1;
@@ -704,12 +614,11 @@ int main(void)
   printf("VL53L0X interrupt mode ready\r\n");
 
   PID_Init(&pid);
-  pid.setpoint        = 0.0f;  // 3.0f   /* start at measured balance angle  */
-  pid.setpoint_target = 0.0f;  // 3.0f   /* ramp target == setpoint   */
+  pid.setpoint        = 0.0f;
+  pid.setpoint_target = 0.0f;
   pixy_balance_setpoint = pid.setpoint;
   last_pid_tick = HAL_GetTick();
 
-  /* start the DMA read */
   HAL_StatusTypeDef BNO055_status = BNO055_Read_DMA(imu_raw_data);
 
   /* USER CODE END 2 */
@@ -719,17 +628,14 @@ int main(void)
   while (1)
   {
 
-		/* ── Service VL53 IRQ ────────────────────────────────────────── */
 		if (vl53_irq_pending != 0U)
-			{
-			  vl53_irq_pending = 0U;
-			  VL53L0X_HandleThresholdEvent();
-			}
+		{
+		  vl53_irq_pending = 0U;
+		  VL53L0X_HandleThresholdEvent();
+		}
 
-		/* ── Handle VL53 brake request ───────────────────────────────── */
 		if (vl53_stop_request != 0U)
 		{
-		  // printf("STOP REQUEST LATCHED at %u mm\r\n", (unsigned int)vl53_last_range_mm);
 			PID_SetTarget(&pid, pixy_balance_setpoint);
 			steer_target  = 0.0f;
 			steer_output  = 0.0f;
@@ -761,13 +667,11 @@ int main(void)
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
 
-			if (HAL_GetTick() - last_imu_tick > 50) {  // 50ms timeout
-				// IMU has gone silent — safe stop
+			if (HAL_GetTick() - last_imu_tick > 50) {
 				MotorA_Brake();
 				MotorB_Brake();
 				printf("IMU timeout — recovering\r\n");
 
-				// Reset I2C and re-arm DMA
 				ResetBNO055();
 				HAL_I2C_DeInit(&bno_i2c);
 				HAL_Delay(10);
@@ -781,7 +685,6 @@ int main(void)
 
 		last_imu_tick = HAL_GetTick();
 
-		// process data here
 		BNO055_DMA_store(&BNO055);
 
 		imu_data_ready = false;
@@ -792,8 +695,8 @@ int main(void)
 		if (dt < DT_MIN_S) dt = DT_MIN_S;
 		if (dt > DT_MAX_S) dt = DT_MAX_S;
 
-		// Kick off the next DMA read. The CPU moves on instantly.
-			  // (Note: To ensure exactly 100Hz, we might move this trigger into a Hardware Timer)
+		/* Kick off the next DMA read. The CPU moves on instantly. */
+		/* (Note: To ensure exactly 100Hz, we might move this trigger into a Hardware Timer) */
 		  BNO055_status = BNO055_Read_DMA(imu_raw_data);
 
 		  if (BNO055_status == HAL_OK) {
@@ -801,7 +704,6 @@ int main(void)
 				  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
 				  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET);
 		  } else {
-			  // I2C is stuck — reset and recover
 			      HAL_I2C_DeInit(&bno_i2c);
 			      HAL_Delay(10);
 			      HAL_I2C_Init(&bno_i2c);
@@ -811,8 +713,6 @@ int main(void)
 
 		  /* ========== PS2 CONTROLLER CODE ========== */
 
-		  		/*PS2 code*/
-		  		/* ── Poll PS2 ────────────────────────────────────────────────── */
 		  		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
 		  		HAL_SPI_TransmitReceive(&hspi3, PS2_TX, PS2_RX, 9, 10);
 		  		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
@@ -820,19 +720,15 @@ int main(void)
 		  		printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x\n", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
 
 
-		  /* ── Determine control mode from PS2 ─────────────────────────── */
 		  ctrl_mode = (PS2_RX[1] == PS2_MODE_ANALOG) ? CTRL_MANUAL : CTRL_AUTO;
 
-		  /* ── Mode transition cleanup ──────────────────────────────────── */
 		  if (ctrl_mode != ctrl_mode_prev)
 		  {
-			  /* Clear steer so no yaw jerk on transition */
 			  steer_target = 0.0f;
 			  steer_output = 0.0f;
 			  pixy_x_filt  = (float)PIXY_FRAME_CX;
 			  pixy_lost_cnt = PIXY_LOST_FRAMES;
 
-			  /* Soft-reset integral — old setpoint history is now irrelevant */
 			  PID_SetTarget(&pid, pixy_balance_setpoint);
 
 			  printf("Mode → %s\r\n",
@@ -840,40 +736,22 @@ int main(void)
 			  ctrl_mode_prev = ctrl_mode;
 		  }
 
-		  /* ── Mode-specific setpoint logic ─────────────────────────────── */
 		  if (ctrl_mode == CTRL_MANUAL)
 		  {
 			  /*
 			   * Left stick Y axis (RX[7]):
-			   *   0x7B = centred (no lean)
-			   *   0x00 = full up   → lean forward  (positive)
-			   *   0xFF = full down → lean backward (negative)
-			   *
-			   * Normalise to [-1, +1] then scale by MANUAL_MAX_LEAN_DEG.
-			   * Stick axis is inverted: 0x00 = up = forward lean.
+			   *   0x7B = centred, 0x00 = full up (forward lean), 0xFF = full down (backward lean)
 			   */
-
-			  // printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x\n", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
-			  // int8_t raw_y = (int8_t)((int16_t)PS2_RX[8] - 0x7B);
-			  /* raw_y: 0x00-0x7B maps to negative (up), 0x7B-0xFF maps to positive (down)
-			   * We negate so up = positive lean (forward) */
 			  float lean = ((float)(PS2_RX[8] - 0x7B) / 127.0f) * MANUAL_MAX_LEAN_DEG;
 
 			  float steer_output = -((float)(PS2_RX[7] - 0x7B) / 127.0f) * STEER_GAIN;
 
-			  /*
-			   * Use PID_SetTarget() so:
-			   *   a) The integral soft-reset fires if the target changes a lot.
-			   *   b) The ramp smooths the stick input (prevents jerk).
-			   */
 			  PID_SetTarget(&pid, pixy_balance_setpoint + lean);
 
-			  /* No steering in manual balance mode — robot goes straight */
 			  steer_target = 0.0f;
 		  }
 		  else /* CTRL_AUTO */
 		  {
-			  /* Pixy tracking — poll every PIXY_POLL_DIV IMU cycles */
 			  if (pixy_enabled)
 			  {
 				  pixy_poll_ctr++;
@@ -884,30 +762,24 @@ int main(void)
 				  }
 			  }
 
-			  /* Steering LP filter — smooth steer_target → steer_output */
 			  steer_output = steer_output * (1.0f - STEER_LP_ALPHA)
 						   + steer_target * STEER_LP_ALPHA;
 		  }
 
-		  /* ── Setpoint ramp (both modes) ─────────────────────────────── */
 		  PID_RampSetpoint(&pid, dt);
 
-		  /* ── IMU readings ────────────────────────────────────────────── */
 		  float pitch      =  BNO055.Euler.Z;
 		  float pitch_rate = -BNO055.Gyro.X;
 
-		  // discard false data
 		  if (pitch < -180.0f || pitch > 180.0f)
 		  {
 			  continue;
 		  }
 
-		  /* ── PID update ──────────────────────────────────────────────── */
 		  bool ok = PID_Update(&pid, pitch, pitch_rate, dt);
 
 		  if (!ok)
 		  {
-			  /* Robot fallen — stop everything and reset */
 			  MotorA_Brake();
 			  MotorB_Brake();
 			  PID_SetTarget(&pid, pixy_balance_setpoint);
@@ -922,17 +794,14 @@ int main(void)
 		  {
 			  if ((int32_t)(HAL_GetTick() - vl53_brake_release_ms) >= 0)
 			  {
-				  /* Hold period over — re-arm VL53 and resume */
 				  VL53L0X_ClearInterruptMask(Dev, 0);
 				  vl53_brake_active      = 0U;
 				  vl53_threshold_latched = 0U;
 				  pixy_poll_ctr          = 0;
 				  printf("VL53 brake released\r\n");
-				  /* Fall through — drive motors normally this cycle */
 			  }
 			  else
 			  {
-				  /* Still braking — hold motors and skip drive */
 				  MotorA_Brake();
 				  MotorB_Brake();
 				  continue;
@@ -940,20 +809,13 @@ int main(void)
 			}
 
 		  if (pid.output == 0.0f && steer_output == 0.0f) {
-					/* Within deadzone and stationary — hard brake */
 					MotorA_Brake();
 					MotorB_Brake();
 				  } else {
-					/* Drive motors using signed PID output */
 					PID_Drive_Motors_Steered(pid.output, steer_output);
 				  }
 
 
-
-
-    // printf("%#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x, %#x\n", PS2_RX[0], PS2_RX[1], PS2_RX[2], PS2_RX[3], PS2_RX[4], PS2_RX[5], PS2_RX[6], PS2_RX[7], PS2_RX[8]);
-
-    // convert to position data
     // Y DATA GIVES POWER (Forward if > 0x7b, backwards if 0x7b > )
     // X DATA GIVES DISTRIBUTION
     	// full to both if x == 0x7b, 
@@ -962,36 +824,12 @@ int main(void)
     	// split ratio based on difference 
     	// use equation x/0xFF and (0xFF - x)/0xFF
 
-
-      /* ── Debug print — remove when tuning is done ───────────────── */
-      //printf("P:%.2f R:%.2f SP:%.2f Out:%.0f Steer:%.0f\r\n",
-              //pitch, pitch_rate, pid.setpoint, pid.output, steer_output);
-
-      /* ── Euler Angles (degrees) ──────────────────────────────── */
-		  /*
-      	  // Euler.Y = Pitch → this is your main balancing angle
-      	  printf("--- BNO055 Data ---\r\n");
-      	  printf("Euler -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
-      	               BNO055.Euler.X, BNO055.Euler.Y, BNO055.Euler.Z);
-
-      	  // ── Gyroscope (degrees/sec) ─────────────────────────────── //
-      	  printf("Accel -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
-      	               BNO055.Accel.X, BNO055.Accel.Y, BNO055.Accel.Z);
-
-      	  // ── Accelerometer (m/s²) ────────────────────────────────── //
-      	  printf("Gyro  -> X: %.2f | Y: %.2f | Z: %.2f\r\n",
-      	               BNO055.Gyro.X, BNO055.Gyro.Y, BNO055.Gyro.Z);
-
-      	  printf("--------------------------------------------------\r\n");
-		*/
 		  printf("setpoint is %.2f\n", pid.setpoint);
 
 
 	  }
 
 
-	// Add a 100ms delay so your terminal doesn't crash from reading too fast
-	//HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -1208,7 +1046,6 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 1 */
 
   /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
   hspi1.Instance = SPI1;
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
@@ -1248,7 +1085,6 @@ static void MX_SPI3_Init(void)
   /* USER CODE BEGIN SPI3_Init 1 */
 
   /* USER CODE END SPI3_Init 1 */
-  /* SPI3 parameter configuration*/
   hspi3.Instance = SPI3;
   hspi3.Init.Mode = SPI_MODE_MASTER;
   hspi3.Init.Direction = SPI_DIRECTION_2LINES;
@@ -1593,14 +1429,14 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
-	GPIO_InitStruct.Pin = GPIO_PIN_7 | GPIO_PIN_14;  // LD2 blue | LD3 red
+	GPIO_InitStruct.Pin = GPIO_PIN_7 | GPIO_PIN_14;  /* LD2 blue | LD3 red */
 	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);  // LD2 blue off
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);  // LD3 red  off
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
@@ -1618,8 +1454,6 @@ PUTCHAR_PROTOTYPE
 
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c) {
     if (hi2c->Instance == I2C2) {
-
-        // Flag the main loop that ALL data is fresh!
         imu_data_ready = true;
     }
 }
@@ -1634,7 +1468,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c) {
     if (hi2c->Instance == I2C2) {
-        imu_i2c_error = true;  // signal main loop, do nothing else
+        imu_i2c_error = true;
     }
 }
 
@@ -1647,14 +1481,13 @@ void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c) {
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)
 	{
 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
-	  for (volatile uint32_t i = 0; i < 1000000; i++); // Software delay
+	  for (volatile uint32_t i = 0; i < 1000000; i++);
 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
-	  for (volatile uint32_t i = 0; i < 1000000; i++); // Software delay
+	  for (volatile uint32_t i = 0; i < 1000000; i++);
 	}
   /* USER CODE END Error_Handler_Debug */
 }
@@ -1669,8 +1502,6 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
